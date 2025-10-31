@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang='pt-BR'>
+<head>
+  <meta charset='UTF-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+  <title>Bíblia Desktop</title>
+  
+  <!-- Bootstrap local -->
+  <link rel='stylesheet' href='{{ url_for("static", filename="bootstrap/css/bootstrap.min.css") }}'>
+</head>
+<body>
+  <nav class='navbar navbar-expand-lg navbar-light bg-light mb-4'>
+    <div class='container-fluid'>
+      <a class='navbar-brand' href='{{ url_for("livros") }}'>Bíblia Desktop</a>
+      <form class='d-flex' action='{{ url_for("trocar_versao") }}' method='get'>
+        <select class='form-select me-2' name='versao' onchange='this.form.submit()'>
+          {% for v in versoes %}
+            <option value='{{ v }}' {% if v == versao %}selected{% endif %}>{{ v|upper }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+  </nav>
+
+  <div class='container'>
+    {% block content %}{% endblock %}
+  </div>
+
+  <!-- Bootstrap JS local -->
+  <script src='{{ url_for("static", filename="bootstrap/js/bootstrap.bundle.min.js") }}'></script>
+</body>
+</html>
+
