@@ -2,7 +2,6 @@ from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from apscheduler.schedulers.background import BackgroundScheduler
 from PIL import Image
 import pytesseract
 import requests
@@ -10,6 +9,13 @@ import json
 import datetime
 import io
 import os
+
+# ---------------- TENTATIVA SEGURA DE IMPORTAR APSCHEDULER ----------------
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+except ModuleNotFoundError:
+    BackgroundScheduler = None
+    print("⚠️ APScheduler não instalado — tarefas automáticas desativadas.")
 
 # ---------------- CONFIGURAÇÕES ----------------
 ZAPI_INSTANCE = "3E9A42A3E2CED133DB7B122EE267B15F"
@@ -23,18 +29,17 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 static_dir = os.path.join(BASE_DIR, "static")
 JSON_FILE = os.path.join(BASE_DIR, "versiculos.json")
 
-# Garante arquivo JSON inicial
+# ---------------- GARANTIR JSON INICIAL ----------------
 if not os.path.exists(JSON_FILE):
     with open(JSON_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=4)
 
+# ---------------- INICIAR APP ----------------
+app = FastAPI()
 if os.path.isdir(static_dir):
-    app = FastAPI()
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
-else:
-    app = FastAPI()
 
-# ---------------- FUNÇÕES PRINCIPAIS ----------------
+# ---------------- FUNÇÕES ----------------
 def enviar_whatsapp(mensagem: str):
     payload = {"phone": NUMERO_DESTINO, "message": mensagem}
     headers = {"Content-Type": "application/json"}
@@ -61,7 +66,7 @@ def enviar_leitura_do_dia():
     except Exception as e:
         print("Erro ao ler JSON:", e)
 
-# ---------------- ROTA WEB ----------------
+# ---------------- ROTAS ----------------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("upload.html", {"request": request})
@@ -83,21 +88,25 @@ async def upload(file: UploadFile = File(...)):
         with open(JSON_FILE, "w", encoding="utf-8") as f:
             json.dump(dados, f, ensure_ascii=False, indent=4)
 
-        # Envia leitura imediatamente
         enviar_leitura_do_dia()
-
-        return JSONResponse({"mensagem": "Imagem enviada, leitura salva e enviada pelo WhatsApp!", "texto_extraido": texto_extraido.strip()})
-
+        return JSONResponse({
+            "mensagem": "Imagem enviada, leitura salva e enviada pelo WhatsApp!",
+            "texto_extraido": texto_extraido.strip()
+        })
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
 
-# ---------------- AGENDAMENTO AUTOMÁTICO ----------------
-scheduler = BackgroundScheduler()
-scheduler.add_job(enviar_leitura_do_dia, "cron", hour=6, minute=0)
-scheduler.start()
+# ---------------- AGENDAMENTO AUTOMÁTICO (OPCIONAL) ----------------
+if BackgroundScheduler:
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(enviar_leitura_do_dia, "cron", hour=6, minute=0)
+    scheduler.start()
+    print("🕒 Agendador APScheduler iniciado com sucesso.")
+else:
+    print("🚫 Agendador desativado — APScheduler não instalado.")
 
-# ---------------- EXECUÇÃO ----------------
+# ---------------- EXECUÇÃO LOCAL ----------------
 if __name__ == "__main__":
     import uvicorn
-    enviar_leitura_do_dia()  # Envia o de hoje imediatamente ao iniciar
+    enviar_leitura_do_dia()  # envia leitura do dia ao iniciar
     uvicorn.run(app, host="0.0.0.0", port=5000)
