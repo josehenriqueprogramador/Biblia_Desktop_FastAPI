@@ -1,34 +1,21 @@
-# Usa uma imagem base leve do Python
-FROM python:3.11-slim
+# Use uma imagem oficial do Python
+FROM python:3.12-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
-
+# Diretório de trabalho dentro do container
 WORKDIR /app
 
-# Instala dependências de sistema (Tesseract + libs para manipulação de imagens)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-por \
-    libtesseract-dev \
-    libleptonica-dev \
-    poppler-utils \
-    libgl1 \
-    libsm6 \
-    libxrender1 \
-    libxext6 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Copia apenas requirements primeiro para aproveitar cache do Docker
+COPY requirements.txt .
 
+# Instala dependências do Python
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Copia todo o restante do código
 COPY . .
 
-# Instala dependências Python necessárias (FastAPI stack + OCR)
-RUN pip install --no-cache-dir \
-    fastapi \
-    "uvicorn[standard]" \
-    jinja2 \
-    python-multipart \
-    pillow \
-    pytesseract
+# Expor a porta usada pelo FastAPI
+EXPOSE 5000
 
-EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Comando para iniciar o servidor Uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000"]
