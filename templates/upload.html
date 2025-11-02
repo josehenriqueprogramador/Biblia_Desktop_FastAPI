@@ -7,10 +7,10 @@
 
     <div class="card mb-3">
         <div class="card-body">
-            <form action="{{ url_for('upload_imagem') }}" enctype="multipart/form-data" method="post">
+            <form action="/upload" enctype="multipart/form-data" method="post">
                 <div class="mb-3">
                     <label for="file" class="form-label">Selecionar imagem</label>
-                    <input class="form-control" type="file" id="file" name="imagem" accept="image/*" required>
+                    <input class="form-control" type="file" id="file" name="file" accept="image/*" required>
                 </div>
                 <button class="btn btn-primary" type="submit">Enviar imagem</button>
             </form>
@@ -18,9 +18,7 @@
     </div>
 
     {% if mensagem %}
-    <div class="alert alert-success">
-        {{ mensagem }}
-    </div>
+    <div class="alert alert-success">{{ mensagem }}</div>
     {% endif %}
 
     {% if texto_extraido %}
@@ -32,9 +30,20 @@
     </div>
     {% endif %}
 
+    {% if todas_leituras %}
     <div class="mt-4">
-        <a href="{{ url_for('listar_leituras') }}" class="btn btn-outline-secondary">Ver todas as leituras extraídas</a>
-        <a href="{{ url_for('leitura_de_hoje') }}?versao={{ versao }}" class="btn btn-outline-success">Ver leitura de hoje</a>
+        <h5>Todas as leituras</h5>
+        <ul>
+            {% for item in todas_leituras %}
+                <li><small>{{ item.data_envio }}</small> — <pre style="display:inline; white-space:pre-wrap;">{{ item.texto }}</pre></li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <div class="mt-4">
+        <a href="/listar_leituras" class="btn btn-outline-secondary">Ver todas as leituras extraídas</a>
+        <a href="/versiculo-hoje?versao={{ versao }}" class="btn btn-outline-success">Ver leitura de hoje</a>
     </div>
 </div>
 {% endblock %}

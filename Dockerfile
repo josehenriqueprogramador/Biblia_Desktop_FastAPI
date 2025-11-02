@@ -1,23 +1,34 @@
-# Usa uma imagem base leve com Python
-FROM python:3.13-slim
+# Usa uma imagem base leve do Python
+FROM python:3.11-slim
 
-# Instala o Tesseract OCR e dependências necessárias
-RUN apt-get update && apt-get install -y \
-    tesseract-ocr \
-    libtesseract-dev \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Define o diretório de trabalho
 WORKDIR /app
 
-# Copia tudo do projeto
+# Instala dependências de sistema (Tesseract + libs para manipulação de imagens)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-por \
+    libtesseract-dev \
+    libleptonica-dev \
+    poppler-utils \
+    libgl1 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 
-# Instala as dependências Python
-RUN pip install --no-cache-dir -r requirements.txt
+# Instala dependências Python necessárias (FastAPI stack + OCR)
+RUN pip install --no-cache-dir \
+    fastapi \
+    "uvicorn[standard]" \
+    jinja2 \
+    python-multipart \
+    pillow \
+    pytesseract
 
-# Expõe a porta usada pelo FastAPI
 EXPOSE 8000
 
-# Comando para rodar o servidor FastAPI
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

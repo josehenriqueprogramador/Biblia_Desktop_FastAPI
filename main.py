@@ -9,54 +9,41 @@ import datetime
 import io
 import os
 
-# ==============================
-# Configurações básicas
-# ==============================
-
 app = FastAPI()
 
-# Caminho absoluto do diretório base
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Diretórios fixos
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 static_dir = os.path.join(BASE_DIR, "static")
 
-# Arquivo JSON dos versículos
 JSON_FILE = os.path.join(BASE_DIR, "versiculos.json")
 
-# Garante que o JSON exista
 if not os.path.exists(JSON_FILE):
     with open(JSON_FILE, "w", encoding="utf-8") as f:
-        json.dump([], f)
+        json.dump([], f, ensure_ascii=False, indent=4)
 
-# Servir arquivos estáticos
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# ==============================
-# Rotas
-# ==============================
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse("upload.html", {"request": request})
+    versoes = ["almeida", "nvi"]
+    versao = request.query_params.get("versao", versoes[0])
+    return templates.TemplateResponse("upload.html", {"request": request, "versoes": versoes, "versao": versao})
 
 
 @app.post("/upload", response_class=HTMLResponse)
 async def upload(request: Request, file: UploadFile = File(...)):
     try:
-        # Lê a imagem enviada
         image_bytes = await file.read()
-        image = Image.open(io.BytesIO(image_bytes))
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-        # Extrai texto via OCR
         texto_extraido = pytesseract.image_to_string(image, lang="por")
 
-        # Data atual
         data_atual = datetime.date.today().isoformat()
         novo_registro = {"data_envio": data_atual, "texto": texto_extraido.strip()}
 
-        # Carrega e atualiza JSON
         with open(JSON_FILE, "r", encoding="utf-8") as f:
             dados = json.load(f)
 
@@ -72,13 +59,13 @@ async def upload(request: Request, file: UploadFile = File(...)):
                 "mensagem": "Imagem enviada e lida com sucesso!",
                 "texto_extraido": texto_extraido.strip(),
                 "data": data_atual,
+                "versoes": ["almeida", "nvi"],
+                "versao": request.query_params.get("versao", "almeida")
             },
         )
 
     except Exception as e:
-        return HTMLResponse(
-            f"<h3>Erro ao processar imagem: {str(e)}</h3>", status_code=500
-        )
+        return HTMLResponse(f"<h3>Erro ao processar imagem: {str(e)}</h3>", status_code=500)
 
 
 @app.get("/versiculo-hoje", response_class=HTMLResponse)
@@ -88,19 +75,41 @@ def versiculo_hoje(request: Request):
         with open(JSON_FILE, "r", encoding="utf-8") as f:
             dados = json.load(f)
 
-        versiculos_hoje = [d for d in dados if d["data_envio"] == hoje]
+        versiculos_hoje = [d for d in dados if d.get("data_envio") == hoje]
+
+        texto = "\n\n".join(v["texto"] for v in versiculos_hoje) if versiculos_hoje else "Nenhum versículo registrado para hoje."
 
         return templates.TemplateResponse(
             "upload.html",
             {
                 "request": request,
                 "mensagem": f"Versículos do dia {hoje}",
-                "texto_extraido": "\n\n".join(v["texto"] for v in versiculos_hoje)
-                if versiculos_hoje else "Nenhum versículo registrado para hoje.",
+                "texto_extraido": texto,
                 "data": hoje,
+                "versoes": ["almeida", "nvi"],
+                "versao": request.query_params.get("versao", "almeida")
             },
         )
 
     except Exception as e:
         return HTMLResponse(f"<h3>Erro ao buscar versículo: {str(e)}</h3>", status_code=500)
 
+
+@app.get("/listar_leituras", response_class=HTMLResponse)
+def listar_leituras(request: Request):
+    try:
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+
+        return templates.TemplateResponse(
+            "upload.html",
+            {
+                "request": request,
+                "mensagem": f"Todas as leituras ({len(dados)})",
+                "todas_leituras": dados,
+                "versoes": ["almeida", "nvi"],
+                "versao": request.query_params.get("versao", "almeida")
+            },
+        )
+    except Exception as e:
+        return HTMLResponse(f"<h3>Erro ao listar leituras: {str(e)}</h3>", status_code=500)
