@@ -3,27 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bíblia Desktop - {{ versao }}</title>
-    
+    <title>Bíblia Desktop - {{ versao|upper }}</title>
+
     <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="/static/bootstrap/css/bootstrap.min.css">
-
-    <!-- CSS customizado -->
-<!--    <link rel="stylesheet" href="/static/css/style.css"> -->
 </head>
 <body>
-    <!-- Navbar simples -->
+    <!-- Navbar -->
     <nav class="navbar navbar-expand-lg navbar-light bg-light mb-3">
         <div class="container-fluid">
             <a class="navbar-brand" href="/">📘 Bíblia Desktop</a>
-            <div class="collapse navbar-collapse">
-                <ul class="navbar-nav me-auto">
+
+            <div class="d-flex align-items-center ms-auto">
+                <label class="me-2 fw-bold">Versão:</label>
+                <select id="versaoSelect" class="form-select form-select-sm" style="width: auto;">
                     {% for v in versoes %}
-                        <li class="nav-item">
-                            <a class="nav-link {% if v == versao %}active{% endif %}" href="/?versao={{ v }}">{{ v.upper() }}</a>
-                        </li>
+                        <option value="{{ v }}" {% if v == versao %}selected{% endif %}>{{ v.upper() }}</option>
                     {% endfor %}
-                </ul>
+                </select>
             </div>
         </div>
     </nav>
@@ -36,6 +33,17 @@
 
     <!-- Bootstrap JS -->
     <script src="/static/bootstrap/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Script para troca de versão -->
+    <script>
+        const select = document.getElementById("versaoSelect");
+        select.addEventListener("change", () => {
+            const novaVersao = select.value;
+            const url = new URL(window.location.href);
+            url.searchParams.set("versao", novaVersao);
+            window.location.href = url.toString();
+        });
+    </script>
 </body>
 </html>
 

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="py-4">
+    <h2>Enviar imagem do cronograma</h2>
+    <p>Envie uma imagem com as leituras (ex: "01/11 - João 1"). O sistema fará OCR e salvará as leituras extraídas.</p>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <form action="{{ url_for('upload_imagem') }}" enctype="multipart/form-data" method="post">
+                <div class="mb-3">
+                    <label for="file" class="form-label">Selecionar imagem</label>
+                    <input class="form-control" type="file" id="file" name="imagem" accept="image/*" required>
+                </div>
+                <button class="btn btn-primary" type="submit">Enviar imagem</button>
+            </form>
+        </div>
+    </div>
+
+    {% if mensagem %}
+    <div class="alert alert-success">
+        {{ mensagem }}
+    </div>
+    {% endif %}
+
+    {% if texto_extraido %}
+    <div class="card">
+        <div class="card-header">Texto extraído</div>
+        <div class="card-body">
+            <pre style="white-space: pre-wrap;">{{ texto_extraido }}</pre>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="mt-4">
+        <a href="{{ url_for('listar_leituras') }}" class="btn btn-outline-secondary">Ver todas as leituras extraídas</a>
+        <a href="{{ url_for('leitura_de_hoje') }}?versao={{ versao }}" class="btn btn-outline-success">Ver leitura de hoje</a>
+    </div>
+</div>
+{% endblock %}

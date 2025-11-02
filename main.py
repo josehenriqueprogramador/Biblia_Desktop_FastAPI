@@ -1,100 +1,98 @@
-import os
-import json
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, File, UploadFile, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from models import LIVROS_NOMES
+from PIL import Image
+import pytesseract
+import json
+import datetime
+import io
+import os
+import re
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-versoes = sorted([f.replace(".json", "") for f in os.listdir(DATA_DIR) if f.endswith(".json")])
-VERSAO_PADRAO = "nvi"  # você pode alterar para a versão que quiser
-
 templates = Jinja2Templates(directory="templates")
 
-
-# Carrega a Bíblia JSON de uma versão
-def carregar_biblia(versao: str):
-    path = os.path.join(DATA_DIR, f"{versao}.json")
-    if not os.path.exists(path):
-        return []
-    with open(path, "r", encoding="utf-8-sig") as f:
-        return json.load(f)
+JSON_FILE = "leituras.json"
 
 
-@app.get("/")
-def index():
-    return RedirectResponse(url="/livros")
-
-
-@app.get("/livros")
-def livros(request: Request, versao: str = VERSAO_PADRAO):
-    biblia = carregar_biblia(versao)
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    """Página inicial com formulário de upload"""
     return templates.TemplateResponse(
-        "livros.html",
+        "upload.html",
+        {"request": request, "mensagem": None, "texto_extraido": None},
+    )
+
+
+@app.post("/upload", response_class=HTMLResponse)
+async def upload(request: Request, file: UploadFile = File(...)):
+    """Lê a imagem enviada, faz OCR e salva no JSON"""
+    image_bytes = await file.read()
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+    texto_extraido = pytesseract.image_to_string(image, lang="por").strip()
+
+    # tenta extrair pares "01/11 - João 3"
+    padrao = re.compile(r"(\d{1,2}/\d{1,2})\s*[-–]\s*([A-Za-zÀ-ÖØ-öø-ÿ0-9\s:]+)")
+    ano_atual = datetime.date.today().year
+    leituras_extraidas = []
+
+    for data, ref in re.findall(padrao, texto_extraido):
+        try:
+            d, m = map(int, data.split("/"))
+            data_iso = f"{ano_atual}-{m:02d}-{d:02d}"
+            leituras_extraidas.append({"data": data_iso, "referencia": ref.strip()})
+        except:
+            continue
+
+    # Carrega leituras anteriores
+    try:
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+    except FileNotFoundError:
+        dados = []
+
+    # adiciona novas
+    dados.extend(leituras_extraidas)
+
+    # salva
+    with open(JSON_FILE, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=4)
+
+    return templates.TemplateResponse(
+        "upload.html",
         {
             "request": request,
-            "livros": biblia,
-            "LIVROS_NOMES": LIVROS_NOMES,
-            "versao": versao,
-            "versoes": versoes,
+            "mensagem": f"Imagem processada! {len(leituras_extraidas)} leitura(s) reconhecida(s).",
+            "texto_extraido": texto_extraido,
         },
     )
 
 
-@app.get("/livro/{livro_abrev}", name="capitulos")
-def capitulos(request: Request, livro_abrev: str, versao: str = VERSAO_PADRAO):
-    biblia = carregar_biblia(versao)
-    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
-    if not livro:
-        return templates.TemplateResponse(
-            "erro.html",
-            {"request": request, "mensagem": "Livro não encontrado"},
-            status_code=404,
-        )
-    total = len(livro.get("chapters", []))
+@app.get("/versiculo-hoje", response_class=HTMLResponse)
+def versiculo_hoje(request: Request):
+    """Mostra a leitura correspondente à data atual"""
+    hoje = datetime.date.today().isoformat()
+
+    try:
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+    except FileNotFoundError:
+        dados = []
+
+    leitura = next((d for d in dados if d["data"] == hoje), None)
+
     return templates.TemplateResponse(
-        "capitulos.html",
+        "upload.html",
         {
             "request": request,
-            "livro": livro,
-            "total": total,
-            "LIVROS_NOMES": LIVROS_NOMES,
-            "versao": versao,
-        },
-    )
-
-
-@app.get("/versiculos/{livro_abrev}/{capitulo}")
-def versiculos(request: Request, livro_abrev: str, capitulo: int, versao: str = VERSAO_PADRAO):
-    biblia = carregar_biblia(versao)
-    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
-    if not livro:
-        return templates.TemplateResponse(
-            "erro.html",
-            {"request": request, "mensagem": "Livro não encontrado"},
-            status_code=404,
-        )
-    chapters = livro.get("chapters", [])
-    if capitulo < 1 or capitulo > len(chapters):
-        return templates.TemplateResponse(
-            "erro.html",
-            {"request": request, "mensagem": "Capítulo não encontrado"},
-            status_code=404,
-        )
-    versiculos = chapters[capitulo - 1]
-    return templates.TemplateResponse(
-        "versiculos.html",
-        {
-            "request": request,
-            "livro": livro,
-            "capitulo": capitulo,
-            "versiculos": versiculos,
-            "LIVROS_NOMES": LIVROS_NOMES,
-            "versao": versao,
+            "mensagem": f"Leitura de hoje ({hoje})",
+            "texto_extraido": leitura["referencia"]
+            if leitura
+            else "Nenhuma leitura programada para hoje.",
         },
     )
 
