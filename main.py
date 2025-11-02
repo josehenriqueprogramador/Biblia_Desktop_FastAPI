@@ -2,26 +2,66 @@ from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from apscheduler.schedulers.background import BackgroundScheduler
 from PIL import Image
 import pytesseract
+import requests
 import json
 import datetime
 import io
 import os
 
-app = FastAPI()
+# ---------------- CONFIGURAÇÕES ----------------
+ZAPI_INSTANCE = "3E9A42A3E2CED133DB7B122EE267B15F"
+ZAPI_TOKEN = "B515A074755027E95E2DD22E"
+NUMERO_DESTINO = "5521920127396"
+
+ZAPI_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}/send-text"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 static_dir = os.path.join(BASE_DIR, "static")
 JSON_FILE = os.path.join(BASE_DIR, "versiculos.json")
 
+# Garante arquivo JSON inicial
 if not os.path.exists(JSON_FILE):
     with open(JSON_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=4)
 
 if os.path.isdir(static_dir):
+    app = FastAPI()
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+else:
+    app = FastAPI()
 
+# ---------------- FUNÇÕES PRINCIPAIS ----------------
+def enviar_whatsapp(mensagem: str):
+    payload = {"phone": NUMERO_DESTINO, "message": mensagem}
+    headers = {"Content-Type": "application/json"}
+    try:
+        response = requests.post(ZAPI_URL, json=payload, headers=headers)
+        if response.status_code == 200:
+            print("✅ Mensagem enviada com sucesso via WhatsApp!")
+        else:
+            print("❌ Erro ao enviar:", response.status_code, response.text)
+    except Exception as e:
+        print("⚠️ Falha na conexão com Z-API:", e)
+
+def enviar_leitura_do_dia():
+    hoje = datetime.date.today().isoformat()
+    try:
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            leituras = json.load(f)
+        leitura_hoje = next((l for l in leituras if l["data_envio"] == hoje), None)
+        if leitura_hoje:
+            mensagem = f"📖 *Leitura do dia ({hoje}):*\n\n{leitura_hoje['texto'][:4000]}"
+            enviar_whatsapp(mensagem)
+        else:
+            print(f"ℹ️ Nenhuma leitura encontrada para {hoje}")
+    except Exception as e:
+        print("Erro ao ler JSON:", e)
+
+# ---------------- ROTA WEB ----------------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("upload.html", {"request": request})
@@ -38,13 +78,26 @@ async def upload(file: UploadFile = File(...)):
 
         with open(JSON_FILE, "r", encoding="utf-8") as f:
             dados = json.load(f)
-
         dados.append(novo_registro)
 
         with open(JSON_FILE, "w", encoding="utf-8") as f:
             json.dump(dados, f, ensure_ascii=False, indent=4)
 
-        return JSONResponse({"mensagem": "Imagem enviada e lida com sucesso!", "texto_extraido": texto_extraido.strip()})
+        # Envia leitura imediatamente
+        enviar_leitura_do_dia()
+
+        return JSONResponse({"mensagem": "Imagem enviada, leitura salva e enviada pelo WhatsApp!", "texto_extraido": texto_extraido.strip()})
 
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
+
+# ---------------- AGENDAMENTO AUTOMÁTICO ----------------
+scheduler = BackgroundScheduler()
+scheduler.add_job(enviar_leitura_do_dia, "cron", hour=6, minute=0)
+scheduler.start()
+
+# ---------------- EXECUÇÃO ----------------
+if __name__ == "__main__":
+    import uvicorn
+    enviar_leitura_do_dia()  # Envia o de hoje imediatamente ao iniciar
+    uvicorn.run(app, host="0.0.0.0", port=5000)
