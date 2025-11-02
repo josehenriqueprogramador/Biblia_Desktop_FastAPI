@@ -7,12 +7,6 @@
     <link rel="stylesheet" href="/static/bootstrap/css/bootstrap.min.css">
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light bg-light mb-3">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="/">📘 Bíblia Desktop</a>
-    </div>
-</nav>
-
 <div class="container py-4">
     <h2>Enviar imagem do cronograma</h2>
     <p>Envie uma imagem com as leituras (ex: "01/11 - João 1"). O sistema fará OCR e mostrará o texto extraído abaixo.</p>
@@ -46,7 +40,6 @@
 <script>
 document.getElementById("uploadForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-
     const fileInput = document.getElementById("file");
     const btn = document.getElementById("uploadBtn");
     const resultado = document.getElementById("resultado");
@@ -68,26 +61,13 @@ document.getElementById("uploadForm").addEventListener("submit", async (e) => {
     formData.append("file", fileInput.files[0]);
 
     try {
-        const response = await fetch("/upload", {
-            method: "POST",
-            body: formData
-        });
+        const response = await fetch("/upload", { method: "POST", body: formData });
+        const data = await response.json();
 
-        if (!response.ok) {
-            throw new Error("Erro ao processar imagem (HTTP " + response.status + ")");
-        }
+        if (data.erro) throw new Error(data.erro);
 
-        const html = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
-        const pre = doc.querySelector("pre");
-
-        if (pre) {
-            textoExtraido.textContent = pre.textContent.trim();
-            resultado.style.display = "block";
-        } else {
-            throw new Error("Não foi possível extrair o texto do retorno do servidor.");
-        }
+        textoExtraido.textContent = data.texto_extraido;
+        resultado.style.display = "block";
     } catch (err) {
         erro.textContent = err.message;
         erro.style.display = "block";
