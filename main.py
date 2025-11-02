@@ -2,97 +2,105 @@ from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from PIL import Image
 import pytesseract
+from PIL import Image
 import json
 import datetime
 import io
 import os
-import re
+
+# ==============================
+# Configurações básicas
+# ==============================
 
 app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
-templates = Jinja2Templates(directory="templates")
+# Caminho absoluto do diretório base
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-JSON_FILE = "leituras.json"
+# Diretórios fixos
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+static_dir = os.path.join(BASE_DIR, "static")
 
+# Arquivo JSON dos versículos
+JSON_FILE = os.path.join(BASE_DIR, "versiculos.json")
+
+# Garante que o JSON exista
+if not os.path.exists(JSON_FILE):
+    with open(JSON_FILE, "w", encoding="utf-8") as f:
+        json.dump([], f)
+
+# Servir arquivos estáticos
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# ==============================
+# Rotas
+# ==============================
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    """Página inicial com formulário de upload"""
-    return templates.TemplateResponse(
-        "upload.html",
-        {"request": request, "mensagem": None, "texto_extraido": None},
-    )
+    return templates.TemplateResponse("upload.html", {"request": request})
 
 
 @app.post("/upload", response_class=HTMLResponse)
 async def upload(request: Request, file: UploadFile = File(...)):
-    """Lê a imagem enviada, faz OCR e salva no JSON"""
-    image_bytes = await file.read()
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-
-    texto_extraido = pytesseract.image_to_string(image, lang="por").strip()
-
-    # tenta extrair pares "01/11 - João 3"
-    padrao = re.compile(r"(\d{1,2}/\d{1,2})\s*[-–]\s*([A-Za-zÀ-ÖØ-öø-ÿ0-9\s:]+)")
-    ano_atual = datetime.date.today().year
-    leituras_extraidas = []
-
-    for data, ref in re.findall(padrao, texto_extraido):
-        try:
-            d, m = map(int, data.split("/"))
-            data_iso = f"{ano_atual}-{m:02d}-{d:02d}"
-            leituras_extraidas.append({"data": data_iso, "referencia": ref.strip()})
-        except:
-            continue
-
-    # Carrega leituras anteriores
     try:
+        # Lê a imagem enviada
+        image_bytes = await file.read()
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # Extrai texto via OCR
+        texto_extraido = pytesseract.image_to_string(image, lang="por")
+
+        # Data atual
+        data_atual = datetime.date.today().isoformat()
+        novo_registro = {"data_envio": data_atual, "texto": texto_extraido.strip()}
+
+        # Carrega e atualiza JSON
         with open(JSON_FILE, "r", encoding="utf-8") as f:
             dados = json.load(f)
-    except FileNotFoundError:
-        dados = []
 
-    # adiciona novas
-    dados.extend(leituras_extraidas)
+        dados.append(novo_registro)
 
-    # salva
-    with open(JSON_FILE, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=4)
+        with open(JSON_FILE, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=4)
 
-    return templates.TemplateResponse(
-        "upload.html",
-        {
-            "request": request,
-            "mensagem": f"Imagem processada! {len(leituras_extraidas)} leitura(s) reconhecida(s).",
-            "texto_extraido": texto_extraido,
-        },
-    )
+        return templates.TemplateResponse(
+            "upload.html",
+            {
+                "request": request,
+                "mensagem": "Imagem enviada e lida com sucesso!",
+                "texto_extraido": texto_extraido.strip(),
+                "data": data_atual,
+            },
+        )
+
+    except Exception as e:
+        return HTMLResponse(
+            f"<h3>Erro ao processar imagem: {str(e)}</h3>", status_code=500
+        )
 
 
 @app.get("/versiculo-hoje", response_class=HTMLResponse)
 def versiculo_hoje(request: Request):
-    """Mostra a leitura correspondente à data atual"""
-    hoje = datetime.date.today().isoformat()
-
     try:
+        hoje = datetime.date.today().isoformat()
         with open(JSON_FILE, "r", encoding="utf-8") as f:
             dados = json.load(f)
-    except FileNotFoundError:
-        dados = []
 
-    leitura = next((d for d in dados if d["data"] == hoje), None)
+        versiculos_hoje = [d for d in dados if d["data_envio"] == hoje]
 
-    return templates.TemplateResponse(
-        "upload.html",
-        {
-            "request": request,
-            "mensagem": f"Leitura de hoje ({hoje})",
-            "texto_extraido": leitura["referencia"]
-            if leitura
-            else "Nenhuma leitura programada para hoje.",
-        },
-    )
+        return templates.TemplateResponse(
+            "upload.html",
+            {
+                "request": request,
+                "mensagem": f"Versículos do dia {hoje}",
+                "texto_extraido": "\n\n".join(v["texto"] for v in versiculos_hoje)
+                if versiculos_hoje else "Nenhum versículo registrado para hoje.",
+                "data": hoje,
+            },
+        )
+
+    except Exception as e:
+        return HTMLResponse(f"<h3>Erro ao buscar versículo: {str(e)}</h3>", status_code=500)
 
