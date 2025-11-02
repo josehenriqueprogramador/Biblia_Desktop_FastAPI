@@ -1,27 +1,40 @@
 import json
 import datetime
 import requests
+import os
 
 # --- Configurações ---
-LEITURAS_JSON = "leituras.json"
+URL_LEITURAS = "https://biblia-desktop-fastapi.onrender.com/leituras.json"
 BIBLIA_JSON = "data/biblia.json"
 
 # Configuração da API Z-API
 WHATSAPP_API_URL = "https://api.z-api.io/instances/3E9A42A3E2CED133DB7B122EE267B15F/token/B515A074755027E95E2DD22E/send-text"
 NUMERO_DESTINO = "5521920127396"
 
-# --- Função para pegar a leitura do dia ---
-def leituras_do_dia(json_file=LEITURAS_JSON):
+# --- Função para pegar a leitura do dia (baixando do Render) ---
+def leituras_do_dia():
     hoje = datetime.date.today().isoformat()
-    with open(json_file, "r", encoding="utf-8") as f:
-        leituras = json.load(f)
-    leituras_hoje = [l for l in leituras if l["data_envio"] == hoje]
-    if not leituras_hoje:
+    print(f"🔍 Buscando leituras de {hoje} em {URL_LEITURAS}...")
+    try:
+        resp = requests.get(URL_LEITURAS, timeout=10)
+        if resp.status_code != 200:
+            print("❌ Erro ao baixar leituras:", resp.status_code)
+            return None
+        leituras = resp.json()
+        leituras_hoje = [l for l in leituras if l["data_envio"] == hoje]
+        if not leituras_hoje:
+            print("⚠️ Nenhuma leitura encontrada para hoje.")
+            return None
+        return leituras_hoje[0]["texto"]
+    except Exception as e:
+        print("❌ Erro ao obter leituras:", e)
         return None
-    return leituras_hoje[0]["texto"]
 
 # --- Função para buscar os versículos completos ---
 def buscar_versiculos_do_texto(texto_ocr: str) -> str:
+    if not os.path.exists(BIBLIA_JSON):
+        print("❌ Arquivo da Bíblia não encontrado:", BIBLIA_JSON)
+        return ""
     with open(BIBLIA_JSON, "r", encoding="utf-8") as f:
         biblia = json.load(f)
     
@@ -32,7 +45,7 @@ def buscar_versiculos_do_texto(texto_ocr: str) -> str:
         linha = linha.strip()
         if not linha or linha.startswith("DIA"):
             continue
-        refs = linha.replace("+", ",").replace("«", ",").split(",")
+        refs = linha.replace("+", ",").replace("«", ",").replace("e", ",").split(",")
         for ref in refs:
             ref = ref.strip()
             if not ref or " " not in ref:
@@ -58,10 +71,7 @@ def buscar_versiculos_do_texto(texto_ocr: str) -> str:
 
 # --- Função para enviar via WhatsApp ---
 def enviar_whatsapp(mensagem: str):
-    payload = {
-        "phone": NUMERO_DESTINO,
-        "message": mensagem
-    }
+    payload = {"phone": NUMERO_DESTINO, "message": mensagem}
     headers = {"Content-Type": "application/json"}
     response = requests.post(WHATSAPP_API_URL, json=payload, headers=headers)
     if response.status_code == 200:
