@@ -29,7 +29,7 @@ static_dir = os.path.join(BASE_DIR, "static")
 LEITURAS_DIR = os.path.join(BASE_DIR, "leituras")
 JSON_FILE = os.path.join(LEITURAS_DIR, "versiculos.json")
 
-# ---------------- GARANTIR PASTA E JSON INICIAL ----------------
+# ---------------- GARANTIR PASTA E JSON ----------------
 os.makedirs(LEITURAS_DIR, exist_ok=True)
 if not os.path.exists(JSON_FILE):
     with open(JSON_FILE, "w", encoding="utf-8") as f:
@@ -53,37 +53,39 @@ def enviar_whatsapp(mensagem: str):
     except Exception as e:
         print("⚠️ Falha na conexão com Z-API:", e)
 
-def enviar_leitura_do_dia():
+def salvar_leitura(texto: str):
+    hoje = datetime.date.today().isoformat()
+    novo_registro = {"data_envio": hoje, "texto": texto.strip()}
+    try:
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+    except Exception:
+        dados = []
+    dados.append(novo_registro)
+    with open(JSON_FILE, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=4)
+    return novo_registro
+
+def get_versiculo_hoje():
     hoje = datetime.date.today().isoformat()
     try:
         with open(JSON_FILE, "r", encoding="utf-8") as f:
             leituras = json.load(f)
-        leitura_hoje = next((l for l in leituras if l["data_envio"] == hoje), None)
-        if leitura_hoje:
-            mensagem = f"📖 *Leitura do dia ({hoje}):*\n\n{leitura_hoje['texto'][:4000]}"
-            enviar_whatsapp(mensagem)
-        else:
-            print(f"ℹ️ Nenhuma leitura encontrada para {hoje}")
-    except Exception as e:
-        print("Erro ao ler JSON:", e)
+    except Exception:
+        leituras = []
+    return next((l for l in leituras if l["data_envio"] == hoje), {"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"})
+
+def enviar_leitura_do_dia():
+    registro = get_versiculo_hoje()
+    if registro.get("texto"):
+        enviar_whatsapp(f"📖 Leitura do dia ({registro['data_envio']}):\n\n{registro['texto'][:4000]}")
+    else:
+        print(f"ℹ️ Nenhuma leitura encontrada para hoje ({registro['data']})")
 
 # ---------------- ROTAS ----------------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("upload.html", {"request": request})
-
-@app.get("/versiculo-hoje")
-async def versiculo_hoje():
-    hoje = datetime.date.today().isoformat()
-    try:
-        with open(JSON_FILE, "r", encoding="utf-8") as f:
-            leituras = json.load(f)
-        leitura_hoje = next((l for l in leituras if l["data_envio"] == hoje), None)
-        if leitura_hoje:
-            return {"data": hoje, "texto": leitura_hoje["texto"]}
-        return {"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"}
-    except Exception as e:
-        return {"erro": str(e)}
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
@@ -91,23 +93,15 @@ async def upload(file: UploadFile = File(...)):
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         texto_extraido = pytesseract.image_to_string(image, lang="por")
-
-        data_atual = datetime.date.today().isoformat()
-        novo_registro = {"data_envio": data_atual, "texto": texto_extraido.strip()}
-
-        with open(JSON_FILE, "r", encoding="utf-8") as f:
-            dados = json.load(f)
-        dados.append(novo_registro)
-        with open(JSON_FILE, "w", encoding="utf-8") as f:
-            json.dump(dados, f, ensure_ascii=False, indent=4)
-
+        salvar_leitura(texto_extraido)
         enviar_leitura_do_dia()
-        return JSONResponse({
-            "mensagem": "Imagem enviada, leitura salva e enviada pelo WhatsApp!",
-            "texto_extraido": texto_extraido.strip()
-        })
+        return JSONResponse({"mensagem": "Imagem enviada, leitura salva e enviada pelo WhatsApp!", "texto_extraido": texto_extraido.strip()})
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
+
+@app.get("/versiculo-hoje")
+async def versiculo_hoje():
+    return JSONResponse(get_versiculo_hoje())
 
 # ---------------- AGENDAMENTO AUTOMÁTICO ----------------
 if BackgroundScheduler:
@@ -121,5 +115,5 @@ else:
 # ---------------- EXECUÇÃO LOCAL ----------------
 if __name__ == "__main__":
     import uvicorn
-    enviar_leitura_do_dia()  # envia leitura do dia ao iniciar
+    enviar_leitura_do_dia()  # envia leitura do dia imediatamente
     uvicorn.run(app, host="0.0.0.0", port=5000)
