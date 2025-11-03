@@ -1,50 +1,10 @@
-﻿{% extends 'base.html' %}
+{% extends "base.html" %}
 {% block content %}
-<div class='container mt-4'>
-<h2>{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }} - Capítulo {{ capitulo }}</h2>
-<div class='row'>
-{% for v in versiculos %}
-<div class='col-md-1 col-sm-2 col-2 mb-2'>
-<button type='button' class='btn btn-outline-primary w-100 versiculo' data-index='{{ loop.index }}' data-text='{{ v }}'>
-{{ loop.index }}
-</button>
+<h2>{{ LIVROS_NOMES.get(livro.abbrev, livro.name) }} - Capítulo {{ capitulo }}</h2>
+<div class="mt-3">
+  {% for v in versiculos %}
+    <p><strong>{{ loop.index }}.</strong> {{ v }}</p>
+  {% endfor %}
 </div>
-{% endfor %}
-</div>
-<div class='mt-3'>
-<h5>Versículos selecionados:</h5>
-<ul id='selecionados'></ul>
-</div>
-</div>
-<script>
-let lastIndex = null;
-const buttons = document.querySelectorAll('.versiculo');
-const selecionadosList = document.getElementById('selecionados');
-function updateSelecionados() {
-selecionadosList.innerHTML = '';
-document.querySelectorAll('.versiculo.selected').forEach(btn => {
-const li = document.createElement('li');
-li.textContent = btn.dataset.index + '. ' + btn.dataset.text;
-selecionadosList.appendChild(li);
-});
-}
-buttons.forEach(btn => {
-btn.addEventListener('click', (e) => {
-const index = parseInt(btn.dataset.index);
-if (e.shiftKey && lastIndex !== null) {
-const start = Math.min(lastIndex, index);
-const end = Math.max(lastIndex, index);
-buttons.forEach(b => {
-const bIndex = parseInt(b.dataset.index);
-if (bIndex >= start && bIndex <= end) { b.classList.add('selected'); }
-});
-} else if (e.ctrlKey || e.metaKey) { btn.classList.toggle('selected'); }
-else { buttons.forEach(b => b.classList.remove('selected')); btn.classList.add('selected'); }
-lastIndex = index; updateSelecionados();
-});
-});
-</script>
-<style>
-.versiculo.selected { background-color: #ffc107 !important; color: #000 !important; }
-</style>
+<a href="/capitulos/{{ livro.abbrev }}" class="btn btn-link mt-3">⬅ Voltar</a>
 {% endblock %}

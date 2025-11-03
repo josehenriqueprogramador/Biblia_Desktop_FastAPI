@@ -1,20 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="container mt-5">
-    <h2 class="mb-4 text-center">Enviar imagem do cronograma</h2>
+<h2>Enviar imagem do cronograma</h2>
+<p>Envie uma imagem com as leituras (ex: "01/11 - João 1"). O sistema fará OCR e salvará a leitura.</p>
 
-    <form action="/ocr" method="post" enctype="multipart/form-data" class="text-center">
-        <div class="mb-3">
-            <input type="file" name="file" class="form-control" required>
-        </div>
-        <button type="submit" class="btn btn-primary">Enviar e Processar</button>
+<div class="card mb-3">
+  <div class="card-body">
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <div class="mb-3">
+        <input class="form-control" type="file" name="file" accept="image/*" required>
+      </div>
+      <button class="btn btn-primary" type="submit">Enviar imagem</button>
     </form>
-
-    {% if texto_extraido %}
-    <div class="mt-4">
-        <h5>📜 Texto extraído:</h5>
-        <pre class="bg-light p-3 border rounded">{{ texto_extraido }}</pre>
-    </div>
-    {% endif %}
+  </div>
 </div>
+
+{% if texto_extraido %}
+<div class="card">
+  <div class="card-header">Texto extraído</div>
+  <div class="card-body"><pre style="white-space: pre-wrap;">{{ texto_extraido }}</pre></div>
+</div>
+{% endif %}
+
+<a href="/livros" class="btn btn-link mt-3">⬅ Voltar</a>
 {% endblock %}
