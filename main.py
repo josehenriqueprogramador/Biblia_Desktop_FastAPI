@@ -10,84 +10,112 @@ import datetime
 import io
 import os
 
-# ---------------- TENTATIVA SEGURA DE IMPORTAR APSCHEDULER ----------------
-try:
-    from apscheduler.schedulers.background import BackgroundScheduler
-except ModuleNotFoundError:
-    BackgroundScheduler = None
-    print("⚠️ APScheduler não instalado — tarefas automáticas desativadas.")
-
-# ---------------- CONFIGURAÇÕES ----------------
+# ----------------- Configurações Z-API -----------------
 ZAPI_INSTANCE = "3E9A42A3E2CED133DB7B122EE267B15F"
 ZAPI_TOKEN = "B515A074755027E95E2DD22E"
 NUMERO_DESTINO = "5521920127396"
 ZAPI_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}/send-text"
 
+# ----------------- Diretórios -----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 static_dir = os.path.join(BASE_DIR, "static")
+DATA_DIR = os.path.join(BASE_DIR, "data")
 LEITURAS_DIR = os.path.join(BASE_DIR, "leituras")
-JSON_FILE = os.path.join(LEITURAS_DIR, "versiculos.json")
+VERSICULOS_FILE = os.path.join(LEITURAS_DIR, "versiculos.json")
+NVI_FILE = os.path.join(DATA_DIR, "nvi.json")
 
-# ---------------- GARANTIR PASTA E JSON ----------------
 os.makedirs(LEITURAS_DIR, exist_ok=True)
-if not os.path.exists(JSON_FILE):
-    with open(JSON_FILE, "w", encoding="utf-8") as f:
-        json.dump([], f, ensure_ascii=False, indent=4)
 
-# ---------------- INICIAR APP ----------------
+# ----------------- Inicializar app -----------------
 app = FastAPI()
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# ---------------- FUNÇÕES ----------------
+# ----------------- Funções -----------------
 def enviar_whatsapp(mensagem: str):
     payload = {"phone": NUMERO_DESTINO, "message": mensagem}
     headers = {"Content-Type": "application/json"}
     try:
         response = requests.post(ZAPI_URL, json=payload, headers=headers)
         if response.status_code == 200:
-            print("✅ Mensagem enviada com sucesso via WhatsApp!")
+            print("✅ Mensagem enviada com sucesso!")
         else:
             print("❌ Erro ao enviar:", response.status_code, response.text)
     except Exception as e:
         print("⚠️ Falha na conexão com Z-API:", e)
 
-def get_versiculo_hoje(texto_completo: str) -> str:
-    hoje = datetime.date.today()
-    blocos = texto_completo.split("DIA ")
-    for bloco in blocos:
-        bloco = bloco.strip()
-        if not bloco or not bloco[0].isdigit():
+def carregar_versiculos():
+    if os.path.exists(VERSICULOS_FILE):
+        with open(VERSICULOS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+def salvar_versiculos(dados):
+    with open(VERSICULOS_FILE, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=4)
+
+def parse_versiculos(texto_ocr):
+    # Ajusta os versículos para formato correto usando NVI
+    if not os.path.exists(NVI_FILE):
+        print("❌ NVI.json não encontrado")
+        return texto_ocr
+    with open(NVI_FILE, "r", encoding="utf-8") as f:
+        biblia = json.load(f)
+
+    linhas = texto_ocr.splitlines()
+    resultado = []
+
+    for linha in linhas:
+        linha = linha.strip()
+        if not linha or linha.startswith("DIA"):
             continue
-        numero_dia = int(bloco[:2])
-        # Se o dia da semana atual coincide com numero_dia
-        if numero_dia == hoje.day % 31 or numero_dia == 1:  # ajuste simples
-            return bloco
+        refs = linha.replace("+", ",").replace("«", ",").split(",")
+        for ref in refs:
+            ref = ref.strip()
+            if " " not in ref:
+                continue
+            try:
+                livro, cap_vers = ref.split(" ", 1)
+                if ":" in cap_vers:
+                    cap, vers = cap_vers.split(":")
+                    if "-" in vers:
+                        inicio, fim = map(int, vers.split("-"))
+                        for i in range(inicio, fim+1):
+                            texto = biblia.get(livro, {}).get(cap, {}).get(str(i), "")
+                            if texto:
+                                resultado.append(f"{livro} {cap}:{i} — {texto}")
+                    else:
+                        texto = biblia.get(livro, {}).get(cap, {}).get(vers, "")
+                        if texto:
+                            resultado.append(f"{livro} {cap}:{vers} — {texto}")
+                else:
+                    texto = biblia.get(livro, {}).get(cap_vers, "")
+                    if texto:
+                        resultado.append(f"{livro} {cap_vers} — {texto}")
+            except Exception:
+                continue
+    return "\n".join(resultado)
+
+def leitura_do_dia():
+    hoje = datetime.date.today().isoformat()
+    versiculos = carregar_versiculos()
+    leitura_hoje = next((v for v in versiculos if v["data_envio"] == hoje), None)
+    if leitura_hoje:
+        return parse_versiculos(leitura_hoje["texto"])
     return None
 
-def enviar_leitura_do_dia():
-    hoje = datetime.date.today().isoformat()
-    try:
-        with open(JSON_FILE, "r", encoding="utf-8") as f:
-            leituras = json.load(f)
-        leitura_hoje = next((l for l in leituras if l["data_envio"] == hoje), None)
-        if leitura_hoje:
-            texto_dia = get_versiculo_hoje(leitura_hoje["texto"])
-            if texto_dia:
-                mensagem = f"📖 *Leitura do dia ({hoje}):*\n\n{texto_dia[:4000]}"
-                enviar_whatsapp(mensagem)
-            else:
-                print(f"ℹ️ Não há versículo específico para hoje no conteúdo armazenado.")
-        else:
-            print(f"ℹ️ Nenhuma leitura encontrada para {hoje}")
-    except Exception as e:
-        print("Erro ao ler JSON:", e)
-
-# ---------------- ROTAS ----------------
+# ----------------- Rotas -----------------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("upload.html", {"request": request})
+
+@app.get("/versiculo-hoje")
+async def versiculo_hoje():
+    texto = leitura_do_dia()
+    if texto:
+        return {"data": datetime.date.today().isoformat(), "texto": texto}
+    return {"data": datetime.date.today().isoformat(), "texto": None, "info": "Nenhuma leitura encontrada"}
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
@@ -95,35 +123,21 @@ async def upload(file: UploadFile = File(...)):
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         texto_extraido = pytesseract.image_to_string(image, lang="por")
+        novo_registro = {"data_envio": datetime.date.today().isoformat(), "texto": texto_extraido.strip()}
 
-        data_atual = datetime.date.today().isoformat()
-        novo_registro = {"data_envio": data_atual, "texto": texto_extraido.strip()}
+        versiculos = carregar_versiculos()
+        versiculos.append(novo_registro)
+        salvar_versiculos(versiculos)
 
-        with open(JSON_FILE, "r", encoding="utf-8") as f:
-            dados = json.load(f)
-        dados.append(novo_registro)
-        with open(JSON_FILE, "w", encoding="utf-8") as f:
-            json.dump(dados, f, ensure_ascii=False, indent=4)
-
-        enviar_leitura_do_dia()
-        return JSONResponse({
-            "mensagem": "Imagem enviada, leitura salva e enviada pelo WhatsApp!",
-            "texto_extraido": texto_extraido.strip()
-        })
+        texto_final = parse_versiculos(texto_extraido)
+        enviar_whatsapp(texto_final if texto_final else "⚠️ Nenhuma leitura encontrada para hoje.")
+        return JSONResponse({"mensagem": "Imagem enviada e leitura processada!", "texto_extraido": texto_extraido.strip()})
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
 
-# ---------------- AGENDAMENTO AUTOMÁTICO ----------------
-if BackgroundScheduler:
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(enviar_leitura_do_dia, "cron", hour=6, minute=0)
-    scheduler.start()
-    print("🕒 Agendador APScheduler iniciado com sucesso.")
-else:
-    print("🚫 Agendador desativado — APScheduler não instalado.")
-
-# ---------------- EXECUÇÃO LOCAL ----------------
+# ----------------- Execução local -----------------
 if __name__ == "__main__":
     import uvicorn
-    enviar_leitura_do_dia()  # envia leitura do dia ao iniciar
+    texto_hoje = leitura_do_dia()
+    enviar_whatsapp(texto_hoje if texto_hoje else "⚠️ Nenhuma leitura encontrada para hoje.")
     uvicorn.run(app, host="0.0.0.0", port=5000)
