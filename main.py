@@ -9,7 +9,6 @@ import json
 import datetime
 import io
 import os
-import re
 
 # ---------------- TENTATIVA SEGURA DE IMPORTAR APSCHEDULER ----------------
 try:
@@ -22,7 +21,6 @@ except ModuleNotFoundError:
 ZAPI_INSTANCE = "3E9A42A3E2CED133DB7B122EE267B15F"
 ZAPI_TOKEN = "B515A074755027E95E2DD22E"
 NUMERO_DESTINO = "5521920127396"
-
 ZAPI_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}/send-text"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +29,7 @@ static_dir = os.path.join(BASE_DIR, "static")
 LEITURAS_DIR = os.path.join(BASE_DIR, "leituras")
 JSON_FILE = os.path.join(LEITURAS_DIR, "versiculos.json")
 
-# ---------------- GARANTIR PASTA E JSON INICIAL ----------------
+# ---------------- GARANTIR PASTA E JSON ----------------
 os.makedirs(LEITURAS_DIR, exist_ok=True)
 if not os.path.exists(JSON_FILE):
     with open(JSON_FILE, "w", encoding="utf-8") as f:
@@ -55,6 +53,19 @@ def enviar_whatsapp(mensagem: str):
     except Exception as e:
         print("⚠️ Falha na conexão com Z-API:", e)
 
+def get_versiculo_hoje(texto_completo: str) -> str:
+    hoje = datetime.date.today()
+    blocos = texto_completo.split("DIA ")
+    for bloco in blocos:
+        bloco = bloco.strip()
+        if not bloco or not bloco[0].isdigit():
+            continue
+        numero_dia = int(bloco[:2])
+        # Se o dia da semana atual coincide com numero_dia
+        if numero_dia == hoje.day % 31 or numero_dia == 1:  # ajuste simples
+            return bloco
+    return None
+
 def enviar_leitura_do_dia():
     hoje = datetime.date.today().isoformat()
     try:
@@ -62,8 +73,12 @@ def enviar_leitura_do_dia():
             leituras = json.load(f)
         leitura_hoje = next((l for l in leituras if l["data_envio"] == hoje), None)
         if leitura_hoje:
-            mensagem = f"📖 *Leitura do dia ({hoje}):*\n\n{leitura_hoje['texto'][:4000]}"
-            enviar_whatsapp(mensagem)
+            texto_dia = get_versiculo_hoje(leitura_hoje["texto"])
+            if texto_dia:
+                mensagem = f"📖 *Leitura do dia ({hoje}):*\n\n{texto_dia[:4000]}"
+                enviar_whatsapp(mensagem)
+            else:
+                print(f"ℹ️ Não há versículo específico para hoje no conteúdo armazenado.")
         else:
             print(f"ℹ️ Nenhuma leitura encontrada para {hoje}")
     except Exception as e:
@@ -87,7 +102,6 @@ async def upload(file: UploadFile = File(...)):
         with open(JSON_FILE, "r", encoding="utf-8") as f:
             dados = json.load(f)
         dados.append(novo_registro)
-
         with open(JSON_FILE, "w", encoding="utf-8") as f:
             json.dump(dados, f, ensure_ascii=False, indent=4)
 
@@ -99,36 +113,7 @@ async def upload(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
 
-@app.get("/versiculo-hoje")
-async def versiculo_hoje():
-    hoje = datetime.date.today()
-    dia_semana = hoje.isoweekday()  # 1 = segunda, 7 = domingo
-    dia_str = f"DIA {dia_semana:02d}"
-
-    if not os.path.exists(JSON_FILE):
-        return {"data": str(hoje), "texto": None, "info": "Nenhuma leitura encontrada"}
-
-    try:
-        with open(JSON_FILE, "r", encoding="utf-8") as f:
-            registros = json.load(f)
-
-        registro_hoje = next((r for r in registros if r["data_envio"] == str(hoje)), None)
-        if not registro_hoje:
-            return {"data": str(hoje), "texto": None, "info": "Nenhuma leitura encontrada"}
-
-        texto_completo = registro_hoje["texto"]
-        match = re.search(rf"{dia_str}\n(.*?)(?:\nDIA \d+|$)", texto_completo, re.DOTALL)
-        texto_dia = match.group(1).strip() if match else None
-
-        if not texto_dia:
-            return {"data": str(hoje), "texto": None, "info": "Nenhuma leitura encontrada"}
-
-        return {"data": str(hoje), "texto": texto_dia}
-
-    except Exception as e:
-        return {"data": str(hoje), "texto": None, "info": f"Erro ao ler o JSON: {e}"}
-
-# ---------------- AGENDAMENTO AUTOMÁTICO (OPCIONAL) ----------------
+# ---------------- AGENDAMENTO AUTOMÁTICO ----------------
 if BackgroundScheduler:
     scheduler = BackgroundScheduler()
     scheduler.add_job(enviar_leitura_do_dia, "cron", hour=6, minute=0)
