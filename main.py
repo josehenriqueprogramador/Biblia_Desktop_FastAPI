@@ -60,7 +60,7 @@ def parse_versiculos(texto_ocr):
     if not os.path.exists(NVI_FILE):
         print("❌ NVI.json não encontrado")
         return texto_ocr
-    with open(NVI_FILE, "r", encoding="utf-8") as f:
+    with open(NVI_FILE, "r", encoding="utf-8-sig") as f:
         biblia = json.load(f)
 
     linhas = texto_ocr.splitlines()
