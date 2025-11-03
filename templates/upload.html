@@ -1,81 +1,20 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bíblia Desktop - OCR</title>
-    <link rel="stylesheet" href="/static/bootstrap/css/bootstrap.min.css">
-</head>
-<body>
-<div class="container py-4">
-    <h2>Enviar imagem do cronograma</h2>
-    <p>Envie uma imagem com as leituras (ex: "01/11 - João 1"). O sistema fará OCR e mostrará o texto extraído abaixo.</p>
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-5">
+    <h2 class="mb-4 text-center">Enviar imagem do cronograma</h2>
 
-    <div class="card mb-3">
-        <div class="card-body">
-            <form id="uploadForm">
-                <div class="mb-3">
-                    <label for="file" class="form-label">Selecionar imagem</label>
-                    <input class="form-control" type="file" id="file" name="file" accept="image/*" required>
-                </div>
-                <button class="btn btn-primary" id="uploadBtn" type="submit">Enviar imagem</button>
-            </form>
+    <form action="/ocr" method="post" enctype="multipart/form-data" class="text-center">
+        <div class="mb-3">
+            <input type="file" name="file" class="form-control" required>
         </div>
-    </div>
+        <button type="submit" class="btn btn-primary">Enviar e Processar</button>
+    </form>
 
-    <div id="resultado" class="mt-3" style="display:none;">
-        <div class="alert alert-success">Imagem enviada e lida com sucesso!</div>
-        <div class="card">
-            <div class="card-header">Texto extraído</div>
-            <div class="card-body">
-                <pre id="textoExtraido" style="white-space: pre-wrap;"></pre>
-            </div>
-        </div>
+    {% if texto_extraido %}
+    <div class="mt-4">
+        <h5>📜 Texto extraído:</h5>
+        <pre class="bg-light p-3 border rounded">{{ texto_extraido }}</pre>
     </div>
-
-    <div id="erro" class="alert alert-danger mt-3" style="display:none;"></div>
+    {% endif %}
 </div>
-
-<script src="/static/bootstrap/js/bootstrap.bundle.min.js"></script>
-<script>
-document.getElementById("uploadForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fileInput = document.getElementById("file");
-    const btn = document.getElementById("uploadBtn");
-    const resultado = document.getElementById("resultado");
-    const erro = document.getElementById("erro");
-    const textoExtraido = document.getElementById("textoExtraido");
-
-    resultado.style.display = "none";
-    erro.style.display = "none";
-
-    if (!fileInput.files.length) {
-        alert("Selecione uma imagem primeiro!");
-        return;
-    }
-
-    btn.disabled = true;
-    btn.innerText = "Enviando...";
-
-    const formData = new FormData();
-    formData.append("file", fileInput.files[0]);
-
-    try {
-        const response = await fetch("/upload", { method: "POST", body: formData });
-        const data = await response.json();
-
-        if (data.erro) throw new Error(data.erro);
-
-        textoExtraido.textContent = data.texto_extraido;
-        resultado.style.display = "block";
-    } catch (err) {
-        erro.textContent = err.message;
-        erro.style.display = "block";
-    } finally {
-        btn.disabled = false;
-        btn.innerText = "Enviar imagem";
-    }
-});
-</script>
-</body>
-</html>
+{% endblock %}

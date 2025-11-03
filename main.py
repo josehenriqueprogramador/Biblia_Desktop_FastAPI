@@ -1,62 +1,55 @@
-# --- cole o código Python aqui ---
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
+from fastapi import FastAPI, File, UploadFile, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 import pytesseract
-import os
-import io
+from PIL import Image
 import json
-from datetime import date
+import os
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Configura pastas estáticas e templates
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-UPLOAD_DIR = "data/uploads"
-NVI_DIR = "data/NVI"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(NVI_DIR, exist_ok=True)
+DATA_PATH = "data"
 
-@app.get("/")
-def index():
-    return {"mensagem": "Envie uma imagem com as leituras (ex: 01/11 - João 1)."}
+# 🏠 Página principal — lista os livros da Bíblia
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    versions = [f.replace(".json", "") for f in os.listdir(DATA_PATH) if f.endswith(".json")]
+    with open(os.path.join(DATA_PATH, "acf.json"), "r", encoding="utf-8") as f:
+        bible_data = json.load(f)
 
-@app.post("/upload")
-async def upload_imagem(file: UploadFile = File(...)):
+    books = list(bible_data.keys())
+    return templates.TemplateResponse("livros.html", {"request": request, "books": books, "versions": versions})
+
+
+# 📄 Página para envio de imagem e OCR
+@app.get("/upload", response_class=HTMLResponse)
+async def upload_page(request: Request):
+    return templates.TemplateResponse("upload.html", {"request": request, "texto_extraido": None})
+
+
+# 🧠 OCR — processa imagem e mostra texto extraído
+@app.post("/ocr", response_class=HTMLResponse)
+async def process_image(request: Request, file: UploadFile = File(...)):
     try:
-        conteudo = await file.read()
-        imagem = Image.open(io.BytesIO(conteudo))
-        texto_extraido = pytesseract.image_to_string(imagem, lang="por")
-        caminho_txt = os.path.join(UPLOAD_DIR, f"{file.filename}.txt")
-        with open(caminho_txt, "w", encoding="utf-8") as f:
-            f.write(texto_extraido)
-        return {
-            "mensagem": "Imagem enviada e lida com sucesso!",
-            "arquivo": file.filename,
-            "texto_extraido": texto_extraido
-        }
+        image = Image.open(file.file)
+        text = pytesseract.image_to_string(image, lang="por")
+        return templates.TemplateResponse("upload.html", {"request": request, "texto_extraido": text})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"erro": f"Falha ao processar imagem: {str(e)}"})
+        return templates.TemplateResponse("upload.html", {"request": request, "texto_extraido": f"Erro ao processar imagem: {e}"})
 
-@app.get("/versiculo-hoje")
-def versiculo_hoje():
-    data_hoje = date.today().strftime("%d/%m")
-    leitura = None
-    for nome_arquivo in os.listdir(UPLOAD_DIR):
-        caminho = os.path.join(UPLOAD_DIR, nome_arquivo)
-        with open(caminho, "r", encoding="utf-8") as f:
-            conteudo = f.read()
-            if data_hoje in conteudo:
-                leitura = conteudo.split(data_hoje, 1)[1].strip().split("\n")[0]
-                break
-    if not leitura:
-        return {"data": str(date.today()), "texto": None, "info": "Nenhuma leitura encontrada"}
-    leitura_formatada = leitura.replace("*", "").replace("+", "").replace("«", "").replace("»", "").strip()
-    return {"data": str(date.today()), "texto": leitura_formatada, "info": "Leitura encontrada com sucesso"}
+
+# ✅ Exemplo de rota para mudar de versão (mantendo lógica anterior)
+@app.get("/versao/{versao}", response_class=HTMLResponse)
+async def mudar_versao(request: Request, versao: str):
+    version_file = os.path.join(DATA_PATH, f"{versao}.json")
+    if not os.path.exists(version_file):
+        return HTMLResponse(content=f"<h3>Versão {versao} não encontrada</h3>", status_code=404)
+    with open(version_file, "r", encoding="utf-8") as f:
+        bible_data = json.load(f)
+    books = list(bible_data.keys())
+    return templates.TemplateResponse("livros.html", {"request": request, "books": books, "versions": os.listdir(DATA_PATH)})
