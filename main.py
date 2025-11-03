@@ -21,7 +21,6 @@ except ModuleNotFoundError:
 ZAPI_INSTANCE = "3E9A42A3E2CED133DB7B122EE267B15F"
 ZAPI_TOKEN = "B515A074755027E95E2DD22E"
 NUMERO_DESTINO = "5521920127396"
-
 ZAPI_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}/send-text"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -95,6 +94,21 @@ async def upload(file: UploadFile = File(...)):
         })
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
+
+# ---------------- ROTA SEGURA PARA VERIFICAR LEITURA DO DIA ----------------
+@app.get("/versiculo-hoje")
+async def versiculo_hoje():
+    hoje = datetime.date.today().isoformat()
+    try:
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            leituras = json.load(f)
+        leitura_hoje = next((l for l in leituras if l["data_envio"] == hoje), None)
+        if leitura_hoje:
+            return {"data": hoje, "texto": leitura_hoje["texto"]}
+        else:
+            return {"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"}
+    except Exception as e:
+        return {"erro": str(e)}
 
 # ---------------- AGENDAMENTO AUTOMÁTICO (OPCIONAL) ----------------
 if BackgroundScheduler:
