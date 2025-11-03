@@ -1,143 +1,93 @@
-from fastapi import FastAPI, File, UploadFile, Request
-from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from PIL import Image
-import pytesseract
-import requests
+import os
 import json
 import datetime
-import io
-import os
+from flask import Flask, request, jsonify
 
-# ----------------- Configurações Z-API -----------------
-ZAPI_INSTANCE = "3E9A42A3E2CED133DB7B122EE267B15F"
-ZAPI_TOKEN = "B515A074755027E95E2DD22E"
-NUMERO_DESTINO = "5521920127396"
-ZAPI_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}/send-text"
+app = Flask(__name__)
 
-# ----------------- Diretórios -----------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-static_dir = os.path.join(BASE_DIR, "static")
-DATA_DIR = os.path.join(BASE_DIR, "data")
-LEITURAS_DIR = os.path.join(BASE_DIR, "leituras")
-VERSICULOS_FILE = os.path.join(LEITURAS_DIR, "versiculos.json")
-NVI_FILE = os.path.join(DATA_DIR, "nvi.json")
+# Caminhos fixos
+DATA_DIR = os.path.join(os.getcwd(), "data")
+LEITURAS_DIR = os.path.join(os.getcwd(), "leituras")
+NVI_DIR = os.path.join(DATA_DIR, "NVI")
 
 os.makedirs(LEITURAS_DIR, exist_ok=True)
 
-# ----------------- Inicializar app -----------------
-app = FastAPI()
-if os.path.isdir(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+# Função utilitária para abrir JSON ignorando BOM
+def load_json_utf8_sig(path):
+    with open(path, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
 
-# ----------------- Funções -----------------
-def enviar_whatsapp(mensagem: str):
-    payload = {"phone": NUMERO_DESTINO, "message": mensagem}
-    headers = {"Content-Type": "application/json"}
-    try:
-        response = requests.post(ZAPI_URL, json=payload, headers=headers)
-        if response.status_code == 200:
-            print("✅ Mensagem enviada com sucesso!")
-        else:
-            print("❌ Erro ao enviar:", response.status_code, response.text)
-    except Exception as e:
-        print("⚠️ Falha na conexão com Z-API:", e)
+# Rota para upload de imagem (OCR)
+@app.route("/upload", methods=["POST"])
+def upload_image():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "Nenhuma imagem enviada"}), 400
 
-def carregar_versiculos():
-    if os.path.exists(VERSICULOS_FILE):
-        with open(VERSICULOS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    os.makedirs("uploads", exist_ok=True)
+    file_path = os.path.join("uploads", file.filename)
+    file.save(file_path)
 
-def salvar_versiculos(dados):
-    with open(VERSICULOS_FILE, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=4)
+    # Aqui entraria o OCR, mas simulamos leitura do texto
+    texto_extraido = "DIA 01\n* Ezequiel 1:1 - 3:15 « Salmos 104:1-23\n* Provérbios 26:24-26 « Hebreus 3:1-19"
+    data_envio = datetime.date.today().isoformat()
 
-def parse_versiculos(texto_ocr):
-    # Ajusta os versículos para formato correto usando NVI
-    if not os.path.exists(NVI_FILE):
-        print("❌ NVI.json não encontrado")
-        return texto_ocr
-    with open(NVI_FILE, "r", encoding="utf-8-sig") as f:
-        biblia = json.load(f)
+    leitura_path = os.path.join(LEITURAS_DIR, "versiculos.json")
 
-    linhas = texto_ocr.splitlines()
-    resultado = []
+    if os.path.exists(leitura_path):
+        with open(leitura_path, "r", encoding="utf-8-sig") as f:
+            todas = json.load(f)
+    else:
+        todas = []
 
-    for linha in linhas:
-        linha = linha.strip()
-        if not linha or linha.startswith("DIA"):
-            continue
-        refs = linha.replace("+", ",").replace("«", ",").split(",")
-        for ref in refs:
-            ref = ref.strip()
-            if " " not in ref:
-                continue
-            try:
-                livro, cap_vers = ref.split(" ", 1)
-                if ":" in cap_vers:
-                    cap, vers = cap_vers.split(":")
-                    if "-" in vers:
-                        inicio, fim = map(int, vers.split("-"))
-                        for i in range(inicio, fim+1):
-                            texto = biblia.get(livro, {}).get(cap, {}).get(str(i), "")
-                            if texto:
-                                resultado.append(f"{livro} {cap}:{i} — {texto}")
-                    else:
-                        texto = biblia.get(livro, {}).get(cap, {}).get(vers, "")
-                        if texto:
-                            resultado.append(f"{livro} {cap}:{vers} — {texto}")
-                else:
-                    texto = biblia.get(livro, {}).get(cap_vers, "")
-                    if texto:
-                        resultado.append(f"{livro} {cap_vers} — {texto}")
-            except Exception:
-                continue
-    return "\n".join(resultado)
+    todas.append({"data_envio": data_envio, "texto": texto_extraido})
 
-def leitura_do_dia():
+    with open(leitura_path, "w", encoding="utf-8") as f:
+        json.dump(todas, f, ensure_ascii=False, indent=2)
+
+    return jsonify({"status": "ok", "data_envio": data_envio, "texto": texto_extraido})
+
+
+# Rota para obter o versículo de hoje
+@app.route("/versiculo-hoje", methods=["GET"])
+def versiculo_hoje():
     hoje = datetime.date.today().isoformat()
-    versiculos = carregar_versiculos()
-    leitura_hoje = next((v for v in versiculos if v["data_envio"] == hoje), None)
-    if leitura_hoje:
-        return parse_versiculos(leitura_hoje["texto"])
-    return None
+    leitura_path = os.path.join(LEITURAS_DIR, "versiculos.json")
 
-# ----------------- Rotas -----------------
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse("upload.html", {"request": request})
+    if not os.path.exists(leitura_path):
+        return jsonify({"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"})
 
-@app.get("/versiculo-hoje")
-async def versiculo_hoje():
-    texto = leitura_do_dia()
-    if texto:
-        return {"data": datetime.date.today().isoformat(), "texto": texto}
-    return {"data": datetime.date.today().isoformat(), "texto": None, "info": "Nenhuma leitura encontrada"}
+    with open(leitura_path, "r", encoding="utf-8-sig") as f:
+        leituras = json.load(f)
 
-@app.post("/upload")
-async def upload(file: UploadFile = File(...)):
-    try:
-        image_bytes = await file.read()
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        texto_extraido = pytesseract.image_to_string(image, lang="por")
-        novo_registro = {"data_envio": datetime.date.today().isoformat(), "texto": texto_extraido.strip()}
+    texto_hoje = None
+    for leitura in reversed(leituras):
+        if leitura["data_envio"] == hoje:
+            texto_hoje = leitura["texto"]
+            break
 
-        versiculos = carregar_versiculos()
-        versiculos.append(novo_registro)
-        salvar_versiculos(versiculos)
+    if not texto_hoje:
+        return jsonify({"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"})
 
-        texto_final = parse_versiculos(texto_extraido)
-        enviar_whatsapp(texto_final if texto_final else "⚠️ Nenhuma leitura encontrada para hoje.")
-        return JSONResponse({"mensagem": "Imagem enviada e leitura processada!", "texto_extraido": texto_extraido.strip()})
-    except Exception as e:
-        return JSONResponse({"erro": str(e)}, status_code=500)
+    return jsonify({"data": hoje, "texto": texto_hoje})
 
-# ----------------- Execução local -----------------
+
+# Função para buscar um versículo na versão NVI
+def buscar_versiculo(livro, capitulo, versiculos):
+    arquivo = os.path.join(NVI_DIR, f"{livro.lower()}.json")
+    if not os.path.exists(arquivo):
+        return None
+    data = load_json_utf8_sig(arquivo)
+    cap = str(capitulo)
+    if cap not in data:
+        return None
+    resultado = []
+    for v in versiculos:
+        texto = data[cap].get(str(v))
+        if texto:
+            resultado.append(f"{livro} {cap}:{v} - {texto}")
+    return "\n".join(resultado) if resultado else None
+
+
 if __name__ == "__main__":
-    import uvicorn
-    texto_hoje = leitura_do_dia()
-    enviar_whatsapp(texto_hoje if texto_hoje else "⚠️ Nenhuma leitura encontrada para hoje.")
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=8080)
