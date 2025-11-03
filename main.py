@@ -1,81 +1,118 @@
-from fastapi import FastAPI, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request, UploadFile, File
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import pytesseract, json, os, datetime
+import os, json
 from PIL import Image
+import pytesseract
+from models import LIVROS_NOMES  # seu models.py existente
 
 app = FastAPI()
 
-# Monta pastas estáticas e templates
+# Configura templates e estáticos
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# Caminhos
-DATA_DIR = "data"
-LEITURA_JSON = "leitura/versiculos.json"
+BASE_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
-os.makedirs("leitura", exist_ok=True)
+# Carrega lista de versões disponíveis (apenas nomes dos arquivos .json)
+VERSOES = sorted([f.replace(".json","") for f in os.listdir(DATA_DIR) if f.endswith(".json")])
 
-# Página inicial (66 livros)
+# Função segura para abrir JSONs com BOM tratado
+def carregar_json_com_bom(path):
+    with open(path, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
+
+# Função que carrega a bíblia da versão padrão (nvi) usando utf-8-sig
+VERSAO_PADRAO = "nvi"
+def obter_biblia(versao=VERSAO_PADRAO):
+    path = os.path.join(DATA_DIR, f"{versao}.json")
+    if not os.path.exists(path):
+        return []
+    return carregar_json_com_bom(path)
+
+# Rota raiz: lista todos os livros (usando JSON da versão padrão)
 @app.get("/", response_class=HTMLResponse)
-def livros(request: Request):
-    try:
-        arquivos = [f.replace(".json", "") for f in os.listdir(DATA_DIR) if f.endswith(".json")]
-    except Exception as e:
-        arquivos = []
-    return templates.TemplateResponse("livros.html", {"request": request, "arquivos": arquivos})
+async def index(request: Request):
+    biblia = obter_biblia()
+    return templates.TemplateResponse("livros.html", {
+        "request": request,
+        "biblia": biblia,
+        "LIVROS_NOMES": LIVROS_NOMES,
+        "versoes": VERSOES,
+        "versao": VERSAO_PADRAO
+    })
 
-# Página de upload de cronograma
+# Lista capítulos de um livro (recebe abreviação)
+@app.get("/capitulos/{livro_abrev}", response_class=HTMLResponse)
+async def capitulos(request: Request, livro_abrev: str, versao: str = VERSAO_PADRAO):
+    biblia = obter_biblia(versao)
+    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
+    if not livro:
+        return HTMLResponse("<h3>Livro não encontrado</h3>", status_code=404)
+    total = len(livro.get("chapters", []))
+    return templates.TemplateResponse("capitulos.html", {
+        "request": request,
+        "livro": livro,
+        "total": total,
+        "LIVROS_NOMES": LIVROS_NOMES,
+        "versoes": VERSOES,
+        "versao": versao
+    })
+
+# Exibe versículos de um capítulo
+@app.get("/versiculos/{livro_abrev}/{capitulo}", response_class=HTMLResponse)
+async def versiculos(request: Request, livro_abrev: str, capitulo: int, versao: str = VERSAO_PADRAO):
+    biblia = obter_biblia(versao)
+    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
+    if not livro:
+        return HTMLResponse("<h3>Livro não encontrado</h3>", status_code=404)
+    chapters = livro.get("chapters", [])
+    if capitulo < 1 or capitulo > len(chapters):
+        return HTMLResponse("<h3>Capítulo não encontrado</h3>", status_code=404)
+    versiculos = chapters[capitulo - 1]
+    return templates.TemplateResponse("versiculos.html", {
+        "request": request,
+        "livro": livro,
+        "capitulo": capitulo,
+        "versiculos": versiculos,
+        "LIVROS_NOMES": LIVROS_NOMES,
+        "versoes": VERSOES,
+        "versao": versao
+    })
+
+# Página de upload (form)
 @app.get("/upload", response_class=HTMLResponse)
-def upload_page(request: Request):
-    return templates.TemplateResponse("upload.html", {"request": request})
+async def upload_page(request: Request):
+    return templates.TemplateResponse("upload.html", {"request": request, "texto": None})
 
-# Processar imagem enviada (OCR)
+# Processa imagem enviada (campo name="imagem" no form)
 @app.post("/upload", response_class=HTMLResponse)
-async def upload_imagem(request: Request, arquivo: UploadFile = File(...)):
+async def processar_imagem(request: Request, imagem: UploadFile = File(...)):
+    if not imagem:
+        return templates.TemplateResponse("upload.html", {"request": request, "texto": "Nenhuma imagem enviada."})
     try:
-        conteudo = await arquivo.read()
-        caminho = f"leitura/{arquivo.filename}"
-        with open(caminho, "wb") as f:
-            f.write(conteudo)
-
-        img = Image.open(caminho)
+        # lê bytes da imagem (UploadFile)
+        conteudo = await imagem.read()
+        img = Image.open(io.BytesIO(conteudo)) if 'io' in globals() else Image.open(imagem.file)
         texto_extraido = pytesseract.image_to_string(img, lang="por")
-
-        # Salvar texto OCR no JSON
-        hoje = datetime.date.today().isoformat()
-        dados = {}
-        if os.path.exists(LEITURA_JSON):
-            with open(LEITURA_JSON, "r", encoding="utf-8") as f:
-                try:
-                    dados = json.load(f)
-                except:
-                    dados = {}
-
-        dados[hoje] = texto_extraido
-        with open(LEITURA_JSON, "w", encoding="utf-8") as f:
-            json.dump(dados, f, ensure_ascii=False, indent=2)
-
-        return templates.TemplateResponse("upload.html", {"request": request, "mensagem": "Imagem lida e salva!", "texto": texto_extraido})
+        return templates.TemplateResponse("upload.html", {"request": request, "texto": texto_extraido})
     except Exception as e:
-        return JSONResponse({"erro": f"Falha ao processar: {str(e)}"})
+        return templates.TemplateResponse("upload.html", {"request": request, "texto": f"Erro: {str(e)}"})
 
-# Rota do versículo do dia
-@app.get("/versiculo-hoje", response_class=JSONResponse)
-def versiculo_hoje():
-    hoje = datetime.date.today().isoformat()
-    if not os.path.exists(LEITURA_JSON):
-        return {"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"}
-
-    with open(LEITURA_JSON, "r", encoding="utf-8") as f:
-        dados = json.load(f)
-
-    if hoje not in dados:
-        return {"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"}
-
-    return {"data": hoje, "texto": dados[hoje]}
+# rota de teste para verificar carregamento com utf-8-sig
+@app.get("/_debug_load/{versao}", response_class=HTMLResponse)
+async def debug_load(request: Request, versao: str):
+    path = os.path.join(DATA_DIR, f"{versao}.json")
+    if not os.path.exists(path):
+        return HTMLResponse(f"<pre>Arquivo {path} não encontrado</pre>", status_code=404)
+    try:
+        data = carregar_json_com_bom(path)
+        return HTMLResponse(f"<pre>OK — {versao}: {len(data)} livros carregados</pre>")
+    except Exception as e:
+        return HTMLResponse(f"<pre>Erro ao carregar {versao}: {e}</pre>", status_code=500)
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+    import uvicorn, io
+    uvicorn.run(app, host="0.0.0.0", port=5000)
