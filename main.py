@@ -1,55 +1,81 @@
-from fastapi import FastAPI, File, UploadFile, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import pytesseract
+import pytesseract, json, os, datetime
 from PIL import Image
-import json
-import os
 
 app = FastAPI()
 
-# Configura pastas estáticas e templates
+# Monta pastas estáticas e templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-DATA_PATH = "data"
+# Caminhos
+DATA_DIR = "data"
+LEITURA_JSON = "leitura/versiculos.json"
 
-# 🏠 Página principal — lista os livros da Bíblia
+os.makedirs("leitura", exist_ok=True)
+
+# Página inicial (66 livros)
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    versions = [f.replace(".json", "") for f in os.listdir(DATA_PATH) if f.endswith(".json")]
-    with open(os.path.join(DATA_PATH, "acf.json"), "r", encoding="utf-8") as f:
-        bible_data = json.load(f)
-
-    books = list(bible_data.keys())
-    return templates.TemplateResponse("livros.html", {"request": request, "books": books, "versions": versions})
-
-
-# 📄 Página para envio de imagem e OCR
-@app.get("/upload", response_class=HTMLResponse)
-async def upload_page(request: Request):
-    return templates.TemplateResponse("upload.html", {"request": request, "texto_extraido": None})
-
-
-# 🧠 OCR — processa imagem e mostra texto extraído
-@app.post("/ocr", response_class=HTMLResponse)
-async def process_image(request: Request, file: UploadFile = File(...)):
+def livros(request: Request):
     try:
-        image = Image.open(file.file)
-        text = pytesseract.image_to_string(image, lang="por")
-        return templates.TemplateResponse("upload.html", {"request": request, "texto_extraido": text})
+        arquivos = [f.replace(".json", "") for f in os.listdir(DATA_DIR) if f.endswith(".json")]
     except Exception as e:
-        return templates.TemplateResponse("upload.html", {"request": request, "texto_extraido": f"Erro ao processar imagem: {e}"})
+        arquivos = []
+    return templates.TemplateResponse("livros.html", {"request": request, "arquivos": arquivos})
 
+# Página de upload de cronograma
+@app.get("/upload", response_class=HTMLResponse)
+def upload_page(request: Request):
+    return templates.TemplateResponse("upload.html", {"request": request})
 
-# ✅ Exemplo de rota para mudar de versão (mantendo lógica anterior)
-@app.get("/versao/{versao}", response_class=HTMLResponse)
-async def mudar_versao(request: Request, versao: str):
-    version_file = os.path.join(DATA_PATH, f"{versao}.json")
-    if not os.path.exists(version_file):
-        return HTMLResponse(content=f"<h3>Versão {versao} não encontrada</h3>", status_code=404)
-    with open(version_file, "r", encoding="utf-8") as f:
-        bible_data = json.load(f)
-    books = list(bible_data.keys())
-    return templates.TemplateResponse("livros.html", {"request": request, "books": books, "versions": os.listdir(DATA_PATH)})
+# Processar imagem enviada (OCR)
+@app.post("/upload", response_class=HTMLResponse)
+async def upload_imagem(request: Request, arquivo: UploadFile = File(...)):
+    try:
+        conteudo = await arquivo.read()
+        caminho = f"leitura/{arquivo.filename}"
+        with open(caminho, "wb") as f:
+            f.write(conteudo)
+
+        img = Image.open(caminho)
+        texto_extraido = pytesseract.image_to_string(img, lang="por")
+
+        # Salvar texto OCR no JSON
+        hoje = datetime.date.today().isoformat()
+        dados = {}
+        if os.path.exists(LEITURA_JSON):
+            with open(LEITURA_JSON, "r", encoding="utf-8") as f:
+                try:
+                    dados = json.load(f)
+                except:
+                    dados = {}
+
+        dados[hoje] = texto_extraido
+        with open(LEITURA_JSON, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=2)
+
+        return templates.TemplateResponse("upload.html", {"request": request, "mensagem": "Imagem lida e salva!", "texto": texto_extraido})
+    except Exception as e:
+        return JSONResponse({"erro": f"Falha ao processar: {str(e)}"})
+
+# Rota do versículo do dia
+@app.get("/versiculo-hoje", response_class=JSONResponse)
+def versiculo_hoje():
+    hoje = datetime.date.today().isoformat()
+    if not os.path.exists(LEITURA_JSON):
+        return {"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"}
+
+    with open(LEITURA_JSON, "r", encoding="utf-8") as f:
+        dados = json.load(f)
+
+    if hoje not in dados:
+        return {"data": hoje, "texto": None, "info": "Nenhuma leitura encontrada"}
+
+    return {"data": hoje, "texto": dados[hoje]}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=10000)
