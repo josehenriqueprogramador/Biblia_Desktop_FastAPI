@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import json, os
@@ -27,7 +27,16 @@ def carregar_biblia(versao):
 async def index(request: Request):
     biblia = carregar_biblia(versao_padrao)
     livros = [(l['abbrev'], LIVROS_NOMES.get(l['abbrev'], l['abbrev'].capitalize())) for l in biblia]
-    return templates.TemplateResponse("livros.html", {"request": request, "livros": livros, "versao": versao_padrao, "versoes": versoes})
+    return templates.TemplateResponse(
+        "livros.html",
+        {
+            "request": request,
+            "livros": livros,
+            "versao": versao_padrao,
+            "versoes": versoes,
+            "LIVROS_NOMES": LIVROS_NOMES
+        }
+    )
 
 @app.get("/capitulos/{livro_abrev}", response_class=HTMLResponse)
 async def capitulos(request: Request, livro_abrev: str):
@@ -36,7 +45,15 @@ async def capitulos(request: Request, livro_abrev: str):
     if not livro:
         return HTMLResponse("Livro não encontrado", status_code=404)
     total = len(livro.get('chapters', []))
-    return templates.TemplateResponse("capitulos.html", {"request": request, "livro": livro, "total": total})
+    return templates.TemplateResponse(
+        "capitulos.html",
+        {
+            "request": request,
+            "livro": livro,
+            "total": total,
+            "LIVROS_NOMES": LIVROS_NOMES
+        }
+    )
 
 @app.get("/versiculos/{livro_abrev}/{capitulo}", response_class=HTMLResponse)
 async def versiculos(request: Request, livro_abrev: str, capitulo: int):
@@ -48,7 +65,16 @@ async def versiculos(request: Request, livro_abrev: str, capitulo: int):
     if capitulo < 1 or capitulo > len(chapters):
         return HTMLResponse("Capítulo não encontrado", status_code=404)
     versiculos = chapters[capitulo - 1]
-    return templates.TemplateResponse("versiculos.html", {"request": request, "livro": livro, "capitulo": capitulo, "versiculos": versiculos})
+    return templates.TemplateResponse(
+        "versiculos.html",
+        {
+            "request": request,
+            "livro": livro,
+            "capitulo": capitulo,
+            "versiculos": versiculos,
+            "LIVROS_NOMES": LIVROS_NOMES
+        }
+    )
 
 # 🔹 Arquivos estáticos
 app.mount("/static", StaticFiles(directory="static"), name="static")
