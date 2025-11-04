@@ -2,11 +2,26 @@ import json
 import datetime
 import requests
 import os
+from pathlib import Path
+try:
+    from PIL import Image
+except ImportError:
+    import pip
+    pip.main(['install', 'Pillow'])
+    from PIL import Image
+try:
+    import pytesseract
+except ImportError:
+    import pip
+    pip.main(['install', 'pytesseract'])
+    import pytesseract
 
 # --- Configurações ---
 LEITURAS_DIR = "leituras"
 LEITURAS_JSON = os.path.join(LEITURAS_DIR, "leituras.json")
 BIBLIA_JSON = "data/nvi.json"
+UPLOADS_DIR = "uploads"
+PROCESSADAS_DIR = os.path.join(UPLOADS_DIR, "processadas")
 
 # Configuração da API Z-API
 WHATSAPP_API_URL = "https://api.z-api.io/instances/3E9A42A3E2CED133DB7B122EE267B15F/send-text"
@@ -15,13 +30,36 @@ CLIENT_TOKEN = "F0d638864098645e1a66bdab8a41ec07aS"  # Substitua pelo seu token
 
 # --- Funções ---
 def garantir_estrutura():
-    if not os.path.exists(LEITURAS_DIR):
-        os.makedirs(LEITURAS_DIR)
-        print(f"📂 Criada pasta {LEITURAS_DIR}")
+    for pasta in [LEITURAS_DIR, UPLOADS_DIR, PROCESSADAS_DIR]:
+        if not os.path.exists(pasta):
+            os.makedirs(pasta)
+            print(f"📂 Criada pasta {pasta}")
     if not os.path.exists(LEITURAS_JSON):
         with open(LEITURAS_JSON, "w", encoding="utf-8") as f:
             json.dump([], f)
         print(f"📄 Criado arquivo JSON vazio {LEITURAS_JSON}")
+
+def processar_imagens_para_json():
+    hoje = datetime.date.today().isoformat()
+    leituras = []
+    for img_path in Path(UPLOADS_DIR).glob("*.*"):
+        if img_path.is_file():
+            try:
+                texto = pytesseract.image_to_string(Image.open(img_path), lang="por")
+                if texto.strip():
+                    leituras.append({"data_envio": hoje, "texto": texto.strip()})
+                    print(f"✅ OCR realizado: {img_path}")
+                # Move a imagem para processadas
+                destino = Path(PROCESSADAS_DIR) / img_path.name
+                img_path.rename(destino)
+            except Exception as e:
+                print(f"❌ Erro ao processar {img_path}: {e}")
+    if leituras:
+        with open(LEITURAS_JSON, "w", encoding="utf-8") as f:
+            json.dump(leituras, f, ensure_ascii=False, indent=2)
+        print(f"📄 Atualizado {LEITURAS_JSON} com as leituras do dia")
+    else:
+        print("⚠️ Nenhum texto extraído das imagens")
 
 def leituras_do_dia():
     hoje = datetime.date.today().isoformat()
@@ -99,6 +137,7 @@ def enviar_whatsapp(mensagem: str):
 def main():
     print("=== Iniciando envio do versículo do dia ===")
     garantir_estrutura()
+    processar_imagens_para_json()  # <- executa OCR antes de buscar leitura
     texto_ocr = leituras_do_dia()
     if not texto_ocr:
         print("Nenhuma leitura para hoje.")
