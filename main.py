@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import json, os
+import adicionar_ocr
 from models import LIVROS_NOMES
 import io
 import sys
