@@ -9,8 +9,9 @@ LEITURAS_JSON = os.path.join(LEITURAS_DIR, "leituras.json")
 BIBLIA_JSON = "data/nvi.json"
 
 # Configuração da API Z-API
-WHATSAPP_API_URL = "https://api.z-api.io/instances/3E9A42A3E2CED133DB7B122EE267B15F/token/B515A074755027E95E2DD22E/send-text"
+WHATSAPP_API_URL = "https://api.z-api.io/instances/3E9A42A3E2CED133DB7B122EE267B15F/send-text"
 NUMERO_DESTINO = "5521920127396"
+CLIENT_TOKEN = "F0d638864098645e1a66bdab8a41ec07aS"  # Substitua pelo seu token
 
 # --- Funções ---
 def garantir_estrutura():
@@ -79,7 +80,10 @@ def buscar_versiculos_do_texto(texto_ocr: str) -> str:
 def enviar_whatsapp(mensagem: str):
     payload = {"phone": NUMERO_DESTINO, "message": mensagem}
     print("📤 Payload que será enviado:", payload)
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Client-Token": CLIENT_TOKEN
+    }
     try:
         response = requests.post(WHATSAPP_API_URL, json=payload, headers=headers)
         print("Status HTTP:", response.status_code)
