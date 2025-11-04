@@ -69,6 +69,9 @@ def buscar_versiculos_do_texto(texto_ocr: str) -> str:
 def enviar_whatsapp(mensagem: str):
     payload = {"phone": NUMERO_DESTINO, "message": mensagem}
     headers = {"Content-Type": "application/json"}
+    print("Payload que será enviado:", payload)
+
+
     try:
         response = requests.post(WHATSAPP_API_URL, json=payload, headers=headers)
         print("Status:", response.status_code)
