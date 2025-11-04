@@ -1,187 +1,125 @@
-from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, Form, UploadFile, File
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import os, json, io, datetime
-from models import LIVROS_NOMES, carregar_biblia
-from PIL import Image
-import pytesseract
+import json, os
+from models import LIVROS_NOMES
+
+app = FastAPI()
 
 BASE_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(BASE_DIR, "data")
-LEITURA_DIR = os.path.join(BASE_DIR, "leitura")
-os.makedirs(LEITURA_DIR, exist_ok=True)
-
-app = FastAPI()
-if os.path.isdir(os.path.join(BASE_DIR, "static")):
-    app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-DEFAULT_VERSAO = "nvi"
-
+# -------------------------------------------------------
+# Funções auxiliares
+# -------------------------------------------------------
 def listar_versoes():
-    if not os.path.isdir(DATA_DIR):
-        return []
-    return sorted([f[:-5] for f in os.listdir(DATA_DIR) if f.endswith(".json")])
+    return sorted([f.replace(".json","") for f in os.listdir(DATA_DIR) if f.endswith(".json")])
 
-def carregar_objetos_biblia(versao=DEFAULT_VERSAO):
+def carregar_biblia(versao):
     caminho = os.path.join(DATA_DIR, f"{versao}.json")
     if not os.path.exists(caminho):
         return []
-    try:
-        return carregar_biblia(caminho)  # retorna lista de objetos Livro
-    except Exception:
-        with open(caminho, "r", encoding="utf-8-sig") as f:
-            return json.load(f)  # fallback: lista de dicts
+    with open(caminho, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
 
+# -------------------------------------------------------
+# Middleware estático
+# -------------------------------------------------------
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
+# -------------------------------------------------------
+# Variável global simples (substitui session do Flask)
+# -------------------------------------------------------
+versao_atual = "nvi"
+
+# -------------------------------------------------------
+# Rotas principais
+# -------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-async def raiz():
-    return RedirectResponse(url="/livros")
+async def index(request: Request):
+    return RedirectResponse(url=request.url_for("livros"))
 
 @app.get("/livros", response_class=HTMLResponse)
-async def rota_livros(request: Request, versao: str = DEFAULT_VERSAO):
-    """
-    Garante sempre passar para o template uma lista de dicts:
-      livros = [{"abrev": "Gn", "nome": "Gênesis"}, ...]
-    Nome é preferencialmente obtido de LIVROS_NOMES, senão do objeto/dict.
-    """
-    versoes = listar_versoes()
-    raw = carregar_objetos_biblia(versao)
-    livros_out = []
-    for item in raw:
-        # suporta objeto (com .abrev, .nome) ou dict (com 'abbrev'/'name')
-        if hasattr(item, "abrev"):
-            abrev = getattr(item, "abrev", None)
-            nome_obj = getattr(item, "nome", None)
-        else:
-            abrev = item.get("abbrev") or item.get("abrev") or item.get("ab")
-            nome_obj = item.get("name") or item.get("nome")
-        # resolve nome usando dicionário primeiro (LIVROS_NOMES), fallback para nome do objeto/dict, fallback para abreviação
-        nome = LIVROS_NOMES.get(abrev) if abrev else None
-        if not nome:
-            nome = nome_obj or abrev or "(sem nome)"
-        livros_out.append({"abrev": abrev, "nome": nome})
+async def livros(request: Request):
+    biblia = carregar_biblia(versao_atual)
     return templates.TemplateResponse("livros.html", {
         "request": request,
-        "livros": livros_out,
-        "versoes": versoes,
-        "versao": versao
+        "livros": biblia,
+        "versao": versao_atual,
+        "versoes": listar_versoes(),
+        "LIVROS_NOMES": LIVROS_NOMES
     })
 
+@app.get("/trocar_versao", response_class=HTMLResponse)
+async def trocar_versao(request: Request, versao: str = "nvi"):
+    global versao_atual
+    if versao in listar_versoes():
+        versao_atual = versao
+    return RedirectResponse(url=request.url_for("livros"))
+
 @app.get("/capitulos/{livro_abrev}", response_class=HTMLResponse)
-async def rota_capitulos(request: Request, livro_abrev: str, versao: str = DEFAULT_VERSAO):
-    livros = carregar_objetos_biblia(versao)
-    # procura objeto/dict por abreviação
-    livro = None
-    for item in livros:
-        if hasattr(item, "abrev") and getattr(item, "abrev", None) == livro_abrev:
-            livro = item; break
-        if isinstance(item, dict) and item.get("abbrev") == livro_abrev:
-            livro = item; break
+async def capitulos(request: Request, livro_abrev: str):
+    biblia = carregar_biblia(versao_atual)
+    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
     if not livro:
         return HTMLResponse("Livro não encontrado", status_code=404)
-    # determina total de capítulos de forma robusta
-    if hasattr(livro, "capitulos"):
-        total = len(getattr(livro, "capitulos", []))
-        nome = getattr(livro, "nome", LIVROS_NOMES.get(livro_abrev, livro_abrev))
-    else:
-        chapters = livro.get("chapters", [])
-        total = len(chapters)
-        nome = LIVROS_NOMES.get(livro_abrev) or livro.get("name") or livro_abrev
+    total = len(livro.get("chapters", []))
     return templates.TemplateResponse("capitulos.html", {
         "request": request,
-        "livro_abrev": livro_abrev,
-        "nome": nome,
+        "livro": livro,
         "total": total,
+        "versao": versao_atual,
         "versoes": listar_versoes(),
-        "versao": versao
+        "LIVROS_NOMES": LIVROS_NOMES
     })
 
 @app.get("/versiculos/{livro_abrev}/{capitulo}", response_class=HTMLResponse)
-async def rota_versiculos(request: Request, livro_abrev: str, capitulo: int, versao: str = DEFAULT_VERSAO):
-    livros = carregar_objetos_biblia(versao)
-    livro = None
-    for item in livros:
-        if hasattr(item, "abrev") and getattr(item, "abrev", None) == livro_abrev:
-            livro = item; break
-        if isinstance(item, dict) and item.get("abbrev") == livro_abrev:
-            livro = item; break
+async def versiculos(request: Request, livro_abrev: str, capitulo: int):
+    biblia = carregar_biblia(versao_atual)
+    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
     if not livro:
         return HTMLResponse("Livro não encontrado", status_code=404)
-    # extrai versículos de forma compatível com objeto ou dict
-    versiculos_list = []
-    if hasattr(livro, "get_capitulo"):
-        cap = livro.get_capitulo(capitulo)
-        if not cap:
-            return HTMLResponse("Capítulo não encontrado", status_code=404)
-        # cap.versiculos é lista de Versiculo objs
-        for v in getattr(cap, "versiculos", []):
-            texto = getattr(v, "texto", None) or str(v)
-            numero = getattr(v, "numero", None)
-            versiculos_list.append({"numero": numero, "texto": texto})
-        nome = getattr(livro, "nome", LIVROS_NOMES.get(livro_abrev, livro_abrev))
-    else:
-        chapters = livro.get("chapters", [])
-        if capitulo < 1 or capitulo > len(chapters):
-            return HTMLResponse("Capítulo não encontrado", status_code=404)
-        for i, t in enumerate(chapters[capitulo-1], start=1):
-            versiculos_list.append({"numero": i, "texto": t})
-        nome = LIVROS_NOMES.get(livro_abrev) or livro.get("name") or livro_abrev
+
+    chapters = livro.get("chapters", [])
+    if capitulo < 1 or capitulo > len(chapters):
+        return HTMLResponse("Capítulo não encontrado", status_code=404)
+
+    versiculos = chapters[capitulo - 1]
     return templates.TemplateResponse("versiculos.html", {
         "request": request,
-        "livro_abrev": livro_abrev,
-        "nome": nome,
+        "livro": livro,
         "capitulo": capitulo,
-        "versiculos": versiculos_list,
+        "versiculos": versiculos,
+        "versao": versao_atual,
         "versoes": listar_versoes(),
-        "versao": versao
+        "LIVROS_NOMES": LIVROS_NOMES
     })
 
-# Upload OCR (preserva comportamento anterior)
+# -------------------------------------------------------
+# Upload de imagem do cronograma (OCR)
+# -------------------------------------------------------
 @app.get("/upload", response_class=HTMLResponse)
-async def upload_get(request: Request, versao: str = DEFAULT_VERSAO):
-    return templates.TemplateResponse("upload.html", {
-        "request": request,
-        "mensagem": None,
-        "texto_extraido": None,
-        "versoes": listar_versoes(),
-        "versao": versao
-    })
+async def upload_form(request: Request):
+    return templates.TemplateResponse("upload.html", {"request": request})
 
 @app.post("/upload", response_class=HTMLResponse)
-async def upload_post(request: Request, file: UploadFile = File(...), versao: str = DEFAULT_VERSAO):
+async def upload_cronograma(request: Request, file: UploadFile = File(...)):
     try:
-        content = await file.read()
-        img = Image.open(io.BytesIO(content)).convert("RGB")
-        texto = pytesseract.image_to_string(img, lang="por")
-        # persiste simples por data
-        path = os.path.join(LEITURA_DIR, "versiculos.json")
-        dados = {}
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    dados = json.load(f)
-            except Exception:
-                dados = {}
-        dados[datetime.date.today().isoformat()] = texto.strip()
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(dados, f, ensure_ascii=False, indent=2)
-        return templates.TemplateResponse("upload.html", {
-            "request": request,
-            "mensagem": "Imagem processada e salva.",
-            "texto_extraido": texto,
-            "versoes": listar_versoes(),
-            "versao": versao
-        })
+        conteudo = await file.read()
+        caminho = os.path.join(BASE_DIR, "uploads", file.filename)
+        os.makedirs(os.path.dirname(caminho), exist_ok=True)
+        with open(caminho, "wb") as f:
+            f.write(conteudo)
+        mensagem = f"Imagem '{file.filename}' enviada com sucesso!"
     except Exception as e:
-        return templates.TemplateResponse("upload.html", {
-            "request": request,
-            "mensagem": f"Erro: {e}",
-            "texto_extraido": None,
-            "versoes": listar_versoes(),
-            "versao": versao
-        })
+        mensagem = f"Erro ao processar a imagem: {e}"
+    return templates.TemplateResponse("upload.html", {"request": request, "mensagem": mensagem})
 
+# -------------------------------------------------------
+# Inicialização
+# -------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=5000)
