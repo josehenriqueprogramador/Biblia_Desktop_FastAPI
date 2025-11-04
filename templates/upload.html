@@ -1,28 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Enviar imagem do cronograma</h2>
-<p>Envie uma imagem com as leituras (ex: "01/11 - João 1").</p>
-<div class="card mb-3">
-  <div class="card-body">
-    <form action="/upload?versao={{ versao }}" method="post" enctype="multipart/form-data">
-      <div class="mb-3">
-        <input class="form-control" type="file" name="file" accept="image/*" required>
-      </div>
-      <button class="btn btn-primary" type="submit">Enviar imagem</button>
-    </form>
-  </div>
+<div class="container mt-4 text-center">
+  <h2>📤 Enviar Cronograma</h2>
+  <form method="post" enctype="multipart/form-data" action="/upload">
+    <div class="mb-3 mt-3">
+      <input type="file" name="file" accept="image/*" class="form-control" required>
+    </div>
+    <button type="submit" class="btn btn-success px-4 py-2">Enviar</button>
+  </form>
+
+  {% if mensagem %}
+    <div class="alert alert-info mt-3">{{ mensagem }}</div>
+  {% endif %}
+
+  {% if texto_extraido %}
+    <h5 class="mt-4">📝 Texto extraído:</h5>
+    <pre class="text-start bg-light p-3 rounded" style="white-space: pre-wrap;">{{ texto_extraido }}</pre>
+  {% endif %}
 </div>
-
-{% if mensagem %}
-  <div class="alert alert-info">{{ mensagem }}</div>
-{% endif %}
-
-{% if texto_extraido %}
-  <div class="card">
-    <div class="card-header">Texto extraído</div>
-    <div class="card-body"><pre style="white-space: pre-wrap;">{{ texto_extraido }}</pre></div>
-  </div>
-{% endif %}
-
-<a href="/livros?versao={{ versao }}" class="btn btn-link mt-3">⬅ Voltar</a>
 {% endblock %}

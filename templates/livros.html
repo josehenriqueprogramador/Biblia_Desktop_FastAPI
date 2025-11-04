@@ -1,22 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="text-center my-3">
-  <h1>📖 Bíblia — {{ versao.upper() }}</h1>
-  <p class="lead">Escolha um livro</p>
-</div>
-<div class="row">
-  {% for livro in biblia %}
-    <div class="col-6 col-md-4 col-lg-3 mb-3">
-      {% if livro.abrev is defined %}
-        <a href="/capitulos/{{ livro.abrev }}?versao={{ versao }}" class="btn btn-primary btn-lg w-100 text-start">
-          {{ livro.nome }}
-        </a>
-      {% else %}
-        <a href="/capitulos/{{ livro['abbrev'] }}?versao={{ versao }}" class="btn btn-primary btn-lg w-100 text-start">
-          {{ LIVROS_NOMES.get(livro['abbrev'], livro.get('name', livro['abbrev'])) }}
-        </a>
-      {% endif %}
-    </div>
-  {% endfor %}
+<div class="container text-center mt-4">
+  <h2>📖 Bíblia — {{ versao|upper }}</h2>
+  <p>Escolha um livro</p>
+  <div class="d-flex flex-wrap justify-content-center mt-3">
+    {% for livro in livros %}
+      <a href="/capitulos/{{ livro.abrev }}?versao={{ versao }}" class="btn btn-primary m-1 px-3 py-2">
+        {{ livro.nome }}
+      </a>
+    {% else %}
+      <p class="text-muted">Nenhum livro encontrado.</p>
+    {% endfor %}
+  </div>
 </div>
 {% endblock %}
