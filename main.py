@@ -142,3 +142,15 @@ def enviar_versiculo():
     print("=== Fim do envio ===")
     return {"status": "Execução realizada, verifique os logs para detalhes"}
 
+
+@app.get("/testar_whatsapp", response_class=PlainTextResponse)
+def testar_whatsapp():
+    buffer = io.StringIO()
+    sys.stdout = buffer
+    try:
+        enviar_leitura_whatsapp.main()  # apenas chama a função main
+    except Exception as e:
+        print("❌ Erro:", e)
+    finally:
+        sys.stdout = sys.__stdout__
+    return buffer.getvalue()
