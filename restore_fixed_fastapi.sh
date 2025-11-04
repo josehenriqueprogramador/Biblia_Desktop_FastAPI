@@ -1,3 +1,8 @@
+#!/usr/bin/env bash
+set -e
+
+# Reescreve main.py e os templates
+cat > main.py <<'PY'
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -84,3 +89,7 @@ async def versiculos(request: Request, livro_abrev: str, capitulo: int):
 
 if os.path.isdir(os.path.join(BASE_DIR, "static")):
     app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+PY
+
+echo "Arquivos restaurados. Agora rode:"
+echo "uvicorn main:app --reload"

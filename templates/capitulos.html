@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>{{ LIVROS_NOMES.get(livro.abbrev, livro.name) }}</h2>
+<h2>{{ LIVROS_NOMES.get(livro.abrev, livro.nome if livro.nome else livro.get('name')) }}</h2>
 <p>Selecione um capítulo:</p>
 <div class="row row-cols-1 row-cols-md-6 g-3">
   {% for i in range(1, total+1) %}
     <div class="col">
-      <a href="/versiculos/{{ livro.abbrev }}/{{ i }}" class="btn btn-success w-100">Capítulo {{ i }}</a>
+      <a href="/versiculos/{{ livro.abrev }}/{{ i }}?versao={{ versao }}" class="btn btn-success w-100">Capítulo {{ i }}</a>
     </div>
   {% endfor %}
 </div>
-<a href="/livros" class="btn btn-link mt-3">⬅ Voltar</a>
+<a href="/livros?versao={{ versao }}" class="btn btn-link mt-3">⬅ Voltar</a>
 {% endblock %}

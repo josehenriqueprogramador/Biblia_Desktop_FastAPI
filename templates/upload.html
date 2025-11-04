@@ -1,11 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Enviar imagem do cronograma</h2>
-<p>Envie uma imagem com as leituras (ex: "01/11 - João 1"). O sistema fará OCR e salvará a leitura.</p>
-
+<p>Envie uma imagem com as leituras (ex: "01/11 - João 1").</p>
 <div class="card mb-3">
   <div class="card-body">
-    <form action="/upload" method="post" enctype="multipart/form-data">
+    <form action="/upload?versao={{ versao }}" method="post" enctype="multipart/form-data">
       <div class="mb-3">
         <input class="form-control" type="file" name="file" accept="image/*" required>
       </div>
@@ -14,12 +13,16 @@
   </div>
 </div>
 
-{% if texto_extraido %}
-<div class="card">
-  <div class="card-header">Texto extraído</div>
-  <div class="card-body"><pre style="white-space: pre-wrap;">{{ texto_extraido }}</pre></div>
-</div>
+{% if mensagem %}
+  <div class="alert alert-info">{{ mensagem }}</div>
 {% endif %}
 
-<a href="/livros" class="btn btn-link mt-3">⬅ Voltar</a>
+{% if texto_extraido %}
+  <div class="card">
+    <div class="card-header">Texto extraído</div>
+    <div class="card-body"><pre style="white-space: pre-wrap;">{{ texto_extraido }}</pre></div>
+  </div>
+{% endif %}
+
+<a href="/livros?versao={{ versao }}" class="btn btn-link mt-3">⬅ Voltar</a>
 {% endblock %}
