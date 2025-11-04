@@ -123,3 +123,22 @@ async def upload_cronograma(request: Request, file: UploadFile = File(...)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5000)
+
+# --- Rota temporária para enviar versículo do dia ---
+from fastapi import FastAPI
+
+# Evita criar outro app se já existir
+try:
+    app
+except NameError:
+    app = FastAPI()
+
+import enviar_leitura_whatsapp
+
+@app.get("/enviar_versiculo")
+def enviar_versiculo():
+    print("=== Iniciando envio de versículo do dia ===")
+    enviar_leitura_whatsapp.main()
+    print("=== Fim do envio ===")
+    return {"status": "Execução realizada, verifique os logs para detalhes"}
+
