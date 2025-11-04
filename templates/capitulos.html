@@ -1,13 +1,29 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
 {% block content %}
-<h2>{{ LIVROS_NOMES.get(livro.abrev, livro.nome if livro.nome else livro.get('name')) }}</h2>
-<p>Selecione um capítulo:</p>
-<div class="row row-cols-1 row-cols-md-6 g-3">
-  {% for i in range(1, total+1) %}
-    <div class="col">
-      <a href="/versiculos/{{ livro.abrev }}/{{ i }}?versao={{ versao }}" class="btn btn-success w-100">Capítulo {{ i }}</a>
-    </div>
+<div class="text-center mb-4">
+  {% if livro.abbrev is defined %}
+    <h2>{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }}</h2>
+  {% else %}
+    <h2>{{ LIVROS_NOMES.get(livro["abbrev"], livro.get("name", livro["abbrev"])) }}</h2>
+  {% endif %}
+  <p>Selecione um capítulo</p>
+</div>
+
+<div class="row row-cols-3 row-cols-md-6 g-3">
+  {% for i in range(1, total + 1) %}
+  <div class="col">
+    {% if livro.abbrev is defined %}
+      <a href='{{ request.url_for("versiculos", livro_abrev=livro.abbrev, capitulo=i) }}?versao={{ versao }}'
+         class="btn btn-success w-100">Capítulo {{ i }}</a>
+    {% else %}
+      <a href='{{ request.url_for("versiculos", livro_abrev=livro["abbrev"], capitulo=i) }}?versao={{ versao }}'
+         class="btn btn-success w-100">Capítulo {{ i }}</a>
+    {% endif %}
+  </div>
   {% endfor %}
 </div>
-<a href="/livros?versao={{ versao }}" class="btn btn-link mt-3">⬅ Voltar</a>
+
+<div class="mt-3">
+  <a href="/livros?versao={{ versao }}" class="btn btn-link">⬅ Voltar</a>
+</div>
 {% endblock %}

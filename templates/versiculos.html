@@ -1,10 +1,176 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
 {% block content %}
-<h2>{{ LIVROS_NOMES.get(livro.abrev, livro.nome if livro.nome else livro.get('name')) }} - Capítulo {{ capitulo }}</h2>
-<div class="mt-3">
-  {% for v in versiculos %}
-    <p><strong>{{ loop.index }}.</strong> {{ v }}</p>
-  {% endfor %}
+<div class="mb-3 text-center">
+  {% if livro.abbrev is defined %}
+    <h2>{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }} — Capítulo {{ capitulo }}</h2>
+  {% else %}
+    <h2>{{ LIVROS_NOMES.get(livro["abbrev"], livro.get("name", livro["abbrev"])) }} — Capítulo {{ capitulo }}</h2>
+  {% endif %}
 </div>
-<a href="/capitulos/{{ livro.abrev }}?versao={{ versao }}" class="btn btn-link mt-3">⬅ Voltar</a>
+
+<div class="card p-3">
+  <div class="mb-3">
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <button id="selectModeBtn" class="btn btn-outline-secondary btn-sm">Ativar seleção (segurar + arrastar)</button>
+      </div>
+      <div>
+        <button id="clearSelection" class="btn btn-sm btn-danger">Limpar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid de números de versículos -->
+  <div id="verseGrid" class="d-flex flex-wrap gap-2 verse-grid">
+    {% for v in versiculos %}
+      {% set idx = loop.index %}
+      <button class="btn btn-outline-primary" data-index="{{ idx }}" data-text="{{ v|e }}">
+        {{ idx }}
+      </button>
+    {% endfor %}
+  </div>
+
+  <!-- Versículos selecionados -->
+  <div class="mt-4">
+    <h5>Versículos selecionados</h5>
+    <div class="card p-2 verses-card">
+      <div id="selecionados"><small>Nenhum versículo selecionado.</small></div>
+    </div>
+  </div>
+</div>
+
+<div class="mt-3">
+  <a href="{{ request.url_for('capitulos', livro_abrev=(livro.abbrev if livro.abbrev is defined else livro['abbrev'])) }}?versao={{ versao }}" class="btn btn-link">⬅ Voltar</a>
+</div>
+
+<script>
+/* Detecção mobile */
+const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+/* Elementos */
+const verseGrid = document.getElementById('verseGrid');
+const selecionadosDiv = document.getElementById('selecionados');
+const btnSelectMode = document.getElementById('selectModeBtn');
+const btnClear = document.getElementById('clearSelection');
+
+let selecting = false;      // modo seleção ativado
+let longPressTimer = null;
+let touched = false;
+let selectedIndexes = new Set();
+
+/* Helpers */
+function updateSelecionados() {
+  if (selectedIndexes.size === 0) {
+    selecionadosDiv.innerHTML = '<small>Nenhum versículo selecionado.</small>';
+    return;
+  }
+  // ordena por índice
+  const idxs = Array.from(selectedIndexes).map(Number).sort((a,b)=>a-b);
+  const texts = idxs.map(i => {
+    const btn = verseGrid.querySelector('[data-index="'+i+'"]');
+    return i + '. ' + (btn ? btn.dataset.text : '');
+  });
+  selecionadosDiv.textContent = texts.join('\\n\\n');
+}
+
+function toggleButton(btn, state) {
+  if (state === undefined) btn.classList.toggle('selected');
+  else if (state) btn.classList.add('selected');
+  else btn.classList.remove('selected');
+}
+
+/* Eventos ao clicar / tocar nos botões (click para desktop, toque longo para mobile) */
+verseGrid.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-index]');
+  if (!btn) return;
+  // se mobile e modo seleção está desativado, considera apenas toggle simples
+  if (isTouch && !selecting) {
+    const idx = btn.dataset.index;
+    if (selectedIndexes.has(idx)) { selectedIndexes.delete(idx); toggleButton(btn, false); }
+    else { selectedIndexes.add(idx); toggleButton(btn, true); }
+    updateSelecionados();
+    return;
+  }
+  // desktop: sempre toggle
+  const idx = btn.dataset.index;
+  if (selectedIndexes.has(idx)) { selectedIndexes.delete(idx); toggleButton(btn, false); }
+  else { selectedIndexes.add(idx); toggleButton(btn, true); }
+  updateSelecionados();
+});
+
+/* Touch: long-press to enable drag selection */
+function startLongPress(e) {
+  if (!isTouch) return;
+  touched = true;
+  longPressTimer = setTimeout(() => {
+    selecting = true;
+    btnSelectMode.textContent = 'Seleção ativa (arraste para selecionar)';
+    btnSelectMode.classList.add('active');
+  }, 350);
+}
+function cancelLongPress() {
+  touched = false;
+  clearTimeout(longPressTimer);
+}
+
+/* Durante movimento, selecionar botões encostados */
+function handleMove(e) {
+  if (!selecting) return;
+  const touch = e.touches ? e.touches[0] : e;
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const btn = el && el.closest && el.closest('button[data-index]');
+  if (btn) {
+    const idx = btn.dataset.index;
+    if (!selectedIndexes.has(idx)) {
+      selectedIndexes.add(idx);
+      toggleButton(btn, true);
+      updateSelecionados();
+    }
+  }
+}
+
+/* Eventos mobile */
+verseGrid.addEventListener('touchstart', (e) => { startLongPress(e); }, {passive:true});
+verseGrid.addEventListener('touchend', (e) => { cancelLongPress(); if (selecting) { /* keep selecting until user toggles off */ } }, {passive:true});
+verseGrid.addEventListener('touchmove', (e) => { handleMove(e); }, {passive:true});
+
+/* Eventos desktop (mouse drag) */
+let mouseDown = false;
+verseGrid.addEventListener('mousedown', (e) => { mouseDown = true; });
+document.addEventListener('mouseup', () => { mouseDown = false; });
+verseGrid.addEventListener('mousemove', (e) => {
+  if (!mouseDown) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const btn = el && el.closest && el.closest('button[data-index]');
+  if (btn) {
+    const idx = btn.dataset.index;
+    if (!selectedIndexes.has(idx)) {
+      selectedIndexes.add(idx);
+      toggleButton(btn, true);
+      updateSelecionados();
+    }
+  }
+});
+
+/* Botões de controle */
+btnSelectMode.addEventListener('click', () => {
+  selecting = !selecting;
+  if (selecting) {
+    btnSelectMode.textContent = 'Seleção ativa (arraste para selecionar)';
+    btnSelectMode.classList.add('active');
+  } else {
+    btnSelectMode.textContent = 'Ativar seleção (segurar + arrastar)';
+    btnSelectMode.classList.remove('active');
+  }
+});
+
+btnClear.addEventListener('click', () => {
+  selectedIndexes.clear();
+  verseGrid.querySelectorAll('button.selected').forEach(b => b.classList.remove('selected'));
+  updateSelecionados();
+});
+
+/* Inicial */
+updateSelecionados();
+</script>
 {% endblock %}
