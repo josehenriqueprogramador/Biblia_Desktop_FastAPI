@@ -4,43 +4,33 @@ import requests
 import os
 
 # --- Configurações ---
-LEITURAS_JSON = "leituras/leituras.json"  # JSON com versículos da semana
-BIBLIA_JSON = "data/nvi.json"             # Bíblia NVI
+BIBLIA_JSON = "data/nvi.json"
+LEITURAS_JSON = "leituras/leituras.json"
 
 # Configuração da API Z-API
-WHATSAPP_API_URL = "https://api.z-api.io/instances/SEU_INSTANCE/token/SEU_TOKEN/send-text"
+WHATSAPP_API_URL = "https://api.z-api.io/instances/3E9A42A3E2CED133DB7B122EE267B15F/token/B515A074755027E95E2DD22E/send-text"
 NUMERO_DESTINO = "5521920127396"
 
-# --- Função para pegar os versículos do dia ---
+# --- Função para pegar a leitura do dia ---
 def leituras_do_dia():
     hoje = datetime.date.today().isoformat()
-    print(f"🔍 Buscando leituras de {hoje} em {LEITURAS_JSON}...")
-
     if not os.path.exists(LEITURAS_JSON):
-        print("❌ JSON de leituras não encontrado.")
-        return None
-
-    try:
-        with open(LEITURAS_JSON, "r", encoding="utf-8") as f:
-            leituras = json.load(f)  # JSON é um dict: { "YYYY-MM-DD": [versiculos] }
-
-        texto_hoje = leituras.get(hoje)
-        if not texto_hoje:
-            print(f"⚠️ Nenhuma leitura encontrada para hoje ({hoje}).")
-            return None
-
-        return "\n".join(texto_hoje), leituras  # retorna também todo o JSON
-
-    except Exception as e:
-        print("❌ Erro ao ler JSON de leituras:", e)
+        print("⚠️ JSON de leituras não encontrado:", LEITURAS_JSON)
         return None, {}
+    with open(LEITURAS_JSON, "r", encoding="utf-8") as f:
+        leituras = json.load(f)
+    texto = leituras.get(hoje)
+    if not texto:
+        print("⚠️ Nenhuma leitura encontrada para hoje.")
+        return None, leituras
+    print(f"🔍 Leituras de {hoje} carregadas com sucesso.")
+    return texto, leituras
 
-# --- Função para buscar os versículos completos na Bíblia ---
+# --- Função para buscar os versículos completos ---
 def buscar_versiculos_do_texto(texto_ocr: str) -> str:
     if not os.path.exists(BIBLIA_JSON):
         print("❌ Arquivo da Bíblia não encontrado:", BIBLIA_JSON)
         return ""
-
     with open(BIBLIA_JSON, "r", encoding="utf-8") as f:
         biblia = json.load(f)
 
@@ -49,7 +39,7 @@ def buscar_versiculos_do_texto(texto_ocr: str) -> str:
 
     for linha in linhas:
         linha = linha.strip()
-        if not linha or linha.upper().startswith("DIA"):
+        if not linha or linha.startswith("DIA"):
             continue
         refs = linha.replace("+", ",").replace("«", ",").replace("e", ",").split(",")
         for ref in refs:
@@ -61,7 +51,7 @@ def buscar_versiculos_do_texto(texto_ocr: str) -> str:
                 cap, vers = resto.split(":")
                 if "-" in vers:
                     inicio, fim = map(int, vers.split("-"))
-                    for i in range(inicio, fim + 1):
+                    for i in range(inicio, fim+1):
                         texto = biblia.get(livro, {}).get(cap, {}).get(str(i), "")
                         if texto:
                             resultado.append(f"{livro} {cap}:{i} — {texto}")
@@ -73,18 +63,22 @@ def buscar_versiculos_do_texto(texto_ocr: str) -> str:
                 texto = biblia.get(livro, {}).get(resto, "")
                 if texto:
                     resultado.append(f"{livro} {resto} — {texto}")
-
     return "\n".join(resultado)
 
 # --- Função para enviar via WhatsApp ---
 def enviar_whatsapp(mensagem: str):
     payload = {"phone": NUMERO_DESTINO, "message": mensagem}
     headers = {"Content-Type": "application/json"}
-    response = requests.post(WHATSAPP_API_URL, json=payload, headers=headers)
-    if response.status_code == 200:
-        print("✅ Mensagem enviada com sucesso via Z-API!")
-    else:
-        print("❌ Erro ao enviar mensagem:", response.status_code, response.text)
+    try:
+        response = requests.post(WHATSAPP_API_URL, json=payload, headers=headers)
+        print("Status:", response.status_code)
+        print("Resposta da Z-API:", response.text)
+        if response.status_code == 200:
+            print("✅ Mensagem enviada com sucesso!")
+        else:
+            print("❌ Não foi possível enviar a mensagem.")
+    except Exception as e:
+        print("❌ Erro ao enviar WhatsApp:", e)
 
 # --- Fluxo principal ---
 def main():
@@ -98,15 +92,19 @@ def main():
         print("Não foi possível gerar o texto completo da Bíblia para hoje.")
         return
 
-    print("Mensagem pronta para envio:\n")
-    print(mensagem_final[:1000] + "\n...")  # imprime os primeiros 1000 caracteres
+    print("Mensagem pronta para envio (primeiros 1000 caracteres):\n")
+    print(mensagem_final[:1000] + "\n...")
 
-    enviar_whatsapp(mensagem_final)
+    # envia em blocos de até 1000 caracteres
+    for i in range(0, len(mensagem_final), 1000):
+        bloco = mensagem_final[i:i+1000]
+        enviar_whatsapp(bloco)
 
-    # --- Remove os versículos do dia do JSON ---
+    # remove os versículos do dia do JSON
     hoje = datetime.date.today().isoformat()
     if hoje in leituras:
         del leituras[hoje]
+        os.makedirs("leituras", exist_ok=True)
         with open(LEITURAS_JSON, "w", encoding="utf-8") as f:
             json.dump(leituras, f, ensure_ascii=False, indent=2)
         print(f"🗑️ Versículos do dia {hoje} removidos do JSON.")
