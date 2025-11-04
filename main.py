@@ -4,7 +4,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import json, os
 from models import LIVROS_NOMES
-
+import io
+import sys
+from fastapi.responses import PlainTextResponse
+import enviar_leitura_whatsapp
 app = FastAPI()
 
 BASE_DIR = os.path.dirname(__file__)
