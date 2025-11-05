@@ -1,8 +1,11 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="mb-3 text-center">
-  {% set nome_completo = LIVROS_NOMES.get(livro.abbrev if livro.abbrev is defined else livro["abbrev"], livro.get("name", livro.abbrev if livro.abbrev is defined else livro["abbrev"])) %}
-  <h2>{{ nome_completo }} — Capítulo {{ capitulo }}</h2>
+  {% if livro.abbrev is defined %}
+    <h2>{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }} — Capítulo {{ capitulo }}</h2>
+  {% else %}
+    <h2>{{ LIVROS_NOMES.get(livro["abbrev"], livro.get("name", livro["abbrev"])) }} — Capítulo {{ capitulo }}</h2>
+  {% endif %}
 </div>
 
 <div class="card p-3">
@@ -17,6 +20,7 @@
     </div>
   </div>
 
+  <!-- Grid de números de versículos -->
   <div id="verseGrid" class="d-flex flex-wrap gap-2 verse-grid">
     {% for v in versiculos %}
       {% set idx = loop.index %}
@@ -26,6 +30,7 @@
     {% endfor %}
   </div>
 
+  <!-- Versículos selecionados -->
   <div class="mt-4">
     <h5>Versículos selecionados</h5>
     <div class="card p-2 verses-card">
@@ -39,49 +44,109 @@
 </div>
 
 <script>
-const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints>0;
+const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 const verseGrid = document.getElementById('verseGrid');
 const selecionadosDiv = document.getElementById('selecionados');
 const btnSelectMode = document.getElementById('selectModeBtn');
 const btnClear = document.getElementById('clearSelection');
 
-let selecting=false,longPressTimer=null,touched=false,selectedIndexes=new Set();
+let selecting = false;
+let longPressTimer = null;
+let touched = false;
+let selectedIndexes = new Set();
 
-function updateSelecionados(){
-  if(selectedIndexes.size===0){selecionadosDiv.innerHTML='<small>Nenhum versículo selecionado.</small>';return;}
-  const idxs=Array.from(selectedIndexes).map(Number).sort((a,b)=>a-b);
-  const texts=idxs.map(i=>{
-    const btn=verseGrid.querySelector('[data-index="'+i+'"]');
-    return i+'. '+(btn?btn.dataset.text:'');
+function updateSelecionados() {
+  if (selectedIndexes.size === 0) {
+    selecionadosDiv.innerHTML = '<small>Nenhum versículo selecionado.</small>';
+    return;
+  }
+  const idxs = Array.from(selectedIndexes).map(Number).sort((a,b)=>a-b);
+  const texts = idxs.map(i => {
+    const btn = verseGrid.querySelector('[data-index="'+i+'"]');
+    return i + '. ' + (btn ? btn.dataset.text : '');
   });
-  selecionadosDiv.innerHTML=texts.join('<br><br>');
+  selecionadosDiv.innerHTML = texts.join('<br><br>');
 }
 
-function toggleButton(btn,state){if(state===undefined)btn.classList.toggle('selected');else if(state)btn.classList.add('selected');else btn.classList.remove('selected');}
+function toggleButton(btn, state) {
+  if (state === undefined) btn.classList.toggle('selected');
+  else if (state) btn.classList.add('selected');
+  else btn.classList.remove('selected');
+}
 
-verseGrid.addEventListener('click',e=>{
-  const btn=e.target.closest('button[data-index]');
-  if(!btn)return;
-  const idx=btn.dataset.index;
-  if(isTouch&&!selecting){if(selectedIndexes.has(idx)){selectedIndexes.delete(idx);toggleButton(btn,false);}else{selectedIndexes.add(idx);toggleButton(btn,true);}updateSelecionados();return;}
-  if(selectedIndexes.has(idx)){selectedIndexes.delete(idx);toggleButton(btn,false);}else{selectedIndexes.add(idx);toggleButton(btn,true);}updateSelecionados();
+verseGrid.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-index]');
+  if (!btn) return;
+  const idx = btn.dataset.index;
+  if (isTouch && !selecting) {
+    selectedIndexes.has(idx) ? selectedIndexes.delete(idx) : selectedIndexes.add(idx);
+    toggleButton(btn);
+    updateSelecionados();
+    return;
+  }
+  selectedIndexes.has(idx) ? selectedIndexes.delete(idx) : selectedIndexes.add(idx);
+  toggleButton(btn);
+  updateSelecionados();
 });
 
-function startLongPress(e){if(!isTouch)return;touched=true;longPressTimer=setTimeout(()=>{selecting=true;btnSelectMode.textContent='Seleção ativa (arraste para selecionar)';btnSelectMode.classList.add('active');},350);}
-function cancelLongPress(){touched=false;clearTimeout(longPressTimer);}
-function handleMove(e){if(!selecting)return;const touch=e.touches?e.touches[0]:e;const el=document.elementFromPoint(touch.clientX,touch.clientY);const btn=el&&el.closest&&el.closest('button[data-index]');if(btn){const idx=btn.dataset.index;if(!selectedIndexes.has(idx)){selectedIndexes.add(idx);toggleButton(btn,true);updateSelecionados();}}}
+function startLongPress(e) {
+  if (!isTouch) return;
+  touched = true;
+  longPressTimer = setTimeout(() => {
+    selecting = true;
+    btnSelectMode.textContent = 'Seleção ativa (arraste para selecionar)';
+    btnSelectMode.classList.add('active');
+  }, 350);
+}
+function cancelLongPress() { touched = false; clearTimeout(longPressTimer); }
 
-verseGrid.addEventListener('touchstart',startLongPress,{passive:true});
-verseGrid.addEventListener('touchend',cancelLongPress,{passive:true});
-verseGrid.addEventListener('touchmove',handleMove,{passive:true});
+function handleMove(e) {
+  if (!selecting) return;
+  const touch = e.touches ? e.touches[0] : e;
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const btn = el && el.closest && el.closest('button[data-index]');
+  if (btn) {
+    const idx = btn.dataset.index;
+    if (!selectedIndexes.has(idx)) {
+      selectedIndexes.add(idx);
+      toggleButton(btn,true);
+      updateSelecionados();
+    }
+  }
+}
 
-let mouseDown=false;
-verseGrid.addEventListener('mousedown',()=>{mouseDown=true;});
-document.addEventListener('mouseup',()=>{mouseDown=false;});
-verseGrid.addEventListener('mousemove',e=>{if(!mouseDown)return;const el=document.elementFromPoint(e.clientX,e.clientY);const btn=el&&el.closest&&el.closest('button[data-index]');if(btn){const idx=btn.dataset.index;if(!selectedIndexes.has(idx)){selectedIndexes.add(idx);toggleButton(btn,true);updateSelecionados();}}});
+verseGrid.addEventListener('touchstart', (e) => { startLongPress(e); }, {passive:true});
+verseGrid.addEventListener('touchend', (e) => { cancelLongPress(); }, {passive:true});
+verseGrid.addEventListener('touchmove', (e) => { handleMove(e); }, {passive:true});
 
-btnSelectMode.addEventListener('click',()=>{selecting=!selecting;if(selecting){btnSelectMode.textContent='Seleção ativa (arraste para selecionar)';btnSelectMode.classList.add('active');}else{btnSelectMode.textContent='Ativar seleção (segurar + arrastar)';btnSelectMode.classList.remove('active');}});
-btnClear.addEventListener('click',()=>{selectedIndexes.clear();verseGrid.querySelectorAll('button.selected').forEach(b=>b.classList.remove('selected'));updateSelecionados();});
+let mouseDown = false;
+verseGrid.addEventListener('mousedown', (e) => { mouseDown = true; });
+document.addEventListener('mouseup', () => { mouseDown = false; });
+verseGrid.addEventListener('mousemove', (e) => {
+  if (!mouseDown) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const btn = el && el.closest && el.closest('button[data-index]');
+  if (btn) {
+    const idx = btn.dataset.index;
+    if (!selectedIndexes.has(idx)) {
+      selectedIndexes.add(idx);
+      toggleButton(btn,true);
+      updateSelecionados();
+    }
+  }
+});
+
+btnSelectMode.addEventListener('click', () => {
+  selecting = !selecting;
+  if (selecting) { btnSelectMode.textContent='Seleção ativa (arraste para selecionar)'; btnSelectMode.classList.add('active'); }
+  else { btnSelectMode.textContent='Ativar seleção (segurar + arrastar)'; btnSelectMode.classList.remove('active'); }
+});
+
+btnClear.addEventListener('click', () => {
+  selectedIndexes.clear();
+  verseGrid.querySelectorAll('button.selected').forEach(b=>b.classList.remove('selected'));
+  updateSelecionados();
+});
 
 updateSelecionados();
 </script>

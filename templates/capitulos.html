@@ -1,8 +1,11 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="text-center mb-4">
-  {% set nome_completo = LIVROS_NOMES.get(livro.abbrev if livro.abbrev is defined else livro["abbrev"], livro.get("name", livro.abbrev if livro.abbrev is defined else livro["abbrev"])) %}
-  <h2>{{ nome_completo }}</h2>
+  {% if livro.abbrev is defined %}
+    <h2>{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }}</h2>
+  {% else %}
+    <h2>{{ LIVROS_NOMES.get(livro["abbrev"], livro.get("name", livro["abbrev"])) }}</h2>
+  {% endif %}
   <p>Selecione um capítulo</p>
 </div>
 
