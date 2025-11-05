@@ -1,8 +1,11 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="mb-3 text-center">
-  {% set abrev = livro.abbrev if livro.abbrev is defined else livro['abbrev'] %}
-  <h2>{{ LIVROS_NOMES.get(abrev, livro.get("name", abrev)) }} — Capítulo {{ capitulo }}</h2>
+  {% if livro.abbrev is defined %}
+    <h2>{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }} — Capítulo {{ capitulo }}</h2>
+  {% else %}
+    <h2>{{ LIVROS_NOMES.get(livro["abbrev"], livro.get("name", livro["abbrev"])) }} — Capítulo {{ capitulo }}</h2>
+  {% endif %}
 </div>
 
 <div class="card p-3">
@@ -35,7 +38,7 @@
 </div>
 
 <div class="mt-3">
-  <a href="{{ request.url_for('capitulos', livro_abrev=abrev) }}?versao={{ versao }}" class="btn btn-link">⬅ Voltar</a>
+  <a href="{{ request.url_for('capitulos', livro_abrev=(livro.abbrev if livro.abbrev is defined else livro['abbrev'])) }}?versao={{ versao }}" class="btn btn-link">⬅ Voltar</a>
 </div>
 
 <script>
