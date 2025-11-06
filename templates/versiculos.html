@@ -70,7 +70,7 @@ function updateSelecionados() {
     const btn = verseGrid.querySelector('[data-index="'+i+'"]');
     return i + '. ' + (btn ? btn.dataset.text : '');
   });
-  selecionadosDiv.textContent = texts.join('\\n\\n');
+  selecionadosDiv.textContent = texts.join('\n\n');
 }
 
 function toggleButton(btn, state) {
