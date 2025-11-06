@@ -527,17 +527,12 @@ document.getElementById(&#039;versaoSelect&#039;)?.addEventListener(&#039;change
 &lt;/html&gt;
 </pre></li><li><span class='file' onclick='toggleFile(this)'>📄 capitulos.html</span><pre class='file-content' style='display:none; margin-top:5px;'>{% extends &#039;base.html&#039; %}
 {% block content %}
+
 &lt;div class=&quot;text-center mb-4&quot;&gt;
-  {% if livro.abbrev is defined %}
-    &lt;h2&gt;{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }}&lt;/h2&gt;
-  {% else %}
-    &lt;h2&gt;{{ LIVROS_NOMES.get(livro[&quot;abbrev&quot;], livro.get(&quot;name&quot;, livro[&quot;abbrev&quot;])) }}&lt;/h2&gt;
-  {% endif %}
+  &lt;h2&gt;{{ LIVROS_NOMES.get(livro[&quot;abbrev&quot;], livro.get(&quot;name&quot;, livro[&quot;abbrev&quot;])) }}&lt;/h2&gt;
   &lt;p&gt;Selecione um capítulo&lt;/p&gt;
 &lt;/div&gt;
 
-&lt;div class=&quot;row row-cols-3 row-cols-md-6 g-3&quot;&gt;
-  {% for i in range(1, total + 1) %}
   &lt;div class=&quot;col&quot;&gt;
     {% if livro.abbrev is defined %}
       &lt;a href=&#039;{{ request.url_for(&quot;versiculos&quot;, livro_abrev=livro.abbrev, capitulo=i) }}?versao={{ versao }}&#039;
@@ -605,11 +600,7 @@ document.getElementById(&#039;versaoSelect&#039;)?.addEventListener(&#039;change
 </pre></li><li><span class='file' onclick='toggleFile(this)'>📄 versiculos.html</span><pre class='file-content' style='display:none; margin-top:5px;'>{% extends &#039;base.html&#039; %}
 {% block content %}
 &lt;div class=&quot;mb-3 text-center&quot;&gt;
-  {% if livro.abbrev is defined %}
-    &lt;h2&gt;{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }} — Capítulo {{ capitulo }}&lt;/h2&gt;
-  {% else %}
-    &lt;h2&gt;{{ LIVROS_NOMES.get(livro[&quot;abbrev&quot;], livro.get(&quot;name&quot;, livro[&quot;abbrev&quot;])) }} — Capítulo {{ capitulo }}&lt;/h2&gt;
-  {% endif %}
+  &lt;h2&gt;{{ LIVROS_NOMES.get(livro[&quot;abbrev&quot;], livro.get(&quot;name&quot;, livro[&quot;abbrev&quot;])) }} — Capítulo {{ capitulo }}&lt;/h2&gt;
 &lt;/div&gt;
 
 &lt;div class=&quot;card p-3&quot;&gt;
@@ -674,7 +665,7 @@ function updateSelecionados() {
     const btn = verseGrid.querySelector(&#039;[data-index=&quot;&#039;+i+&#039;&quot;]&#039;);
     return i + &#039;. &#039; + (btn ? btn.dataset.text : &#039;&#039;);
   });
-  selecionadosDiv.textContent = texts.join(&#039;\\n\\n&#039;);
+  selecionadosDiv.textContent = texts.join(&#039;\n\n&#039;);
 }
 
 function toggleButton(btn, state) {
@@ -688,7 +679,10 @@ verseGrid.addEventListener(&#039;click&#039;, (e) =&gt; {
   const btn = e.target.closest(&#039;button[data-index]&#039;);
   if (!btn) return;
   // se mobile e modo seleção está desativado, considera apenas toggle simples
-  i
+  if (isTouch &amp;&amp; !selecting) {
+    const idx = btn.dataset.index;
+    if (selectedIndexes.has(idx)) { selectedIndexes.delete(idx); toggleButton(btn, false); }
+   
 
 [... arquivo truncado por tamanho ...]</pre></li></ul></li></ul>
 <script>
