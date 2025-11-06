@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang='pt-br'>
+<head>
+<meta charset='UTF-8'>
+<title>Estrutura Completa do Projeto</title>
+<style>
+body { font-family: Arial, sans-serif; padding: 20px; background: #fefefe; color: #333; }
+ul { margin:0; padding:0; }
+li { margin:2px 0; }
+.folder { cursor: pointer; font-weight: bold; color: #007bff; }
+.file { cursor: pointer; color: #555; }
+pre { background:#f4f4f4; padding:10px; border:1px solid #ccc; overflow:auto; border-radius:4px; }
+</style>
+</head>
+<body>
+<h1>📂 Estrutura Completa do Projeto</h1>
+<p>Clique nas pastas ou arquivos para expandir/contrair.</p>
+<ul style='list-style:none;padding-left:0px;'><li><span class='file' onclick='toggleFile(this)'>📄 Dockerfile</span><pre class='file-content' style='display:none; margin-top:5px;'>FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
+
+RUN apt-get update &amp;&amp; apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-por \
+    libtesseract-dev \
+    libleptonica-dev \
+    pkg-config \
+    git \
+    curl \
+    &amp;&amp; apt-get clean \
+    &amp;&amp; rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY . /app
+
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Volume persistente para leituras
+VOLUME /app/leituras
+
+EXPOSE 5000
+
+CMD [&quot;uvicorn&quot;, &quot;main:app&quot;, &quot;--host&quot;, &quot;0.0.0.0&quot;, &quot;--port&quot;, &quot;5000&quot;]
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 adicionar_ocr.py</span><pre class='file-content' style='display:none; margin-top:5px;'>from fastapi import FastAPI
+from pathlib import Path
+from PIL import Image
+import pytesseract
+import json
+import datetime
+import enviar_leitura_whatsapp
+
+# Evita criar outro app se já existir
+try:
+    app
+except NameError:
+    app = FastAPI()
+
+@app.get(&quot;/processar_ocr&quot;)
+def processar_ocr():
+    uploads_dir = Path(&quot;uploads&quot;)
+    processadas_dir = uploads_dir / &quot;processadas&quot;
+    processadas_dir.mkdir(exist_ok=True)
+
+    mensagens = []
+    for img_path in uploads_dir.glob(&quot;*.*&quot;):
+        if (processadas_dir / img_path.name).exists():
+            continue  # já processada
+
+        try:
+            texto = pytesseract.image_to_string(Image.open(img_path), lang=&quot;por&quot;)
+            
+            # salva no JSON de leituras
+            enviar_leitura_whatsapp.garantir_estrutura()
+            with open(enviar_leitura_whatsapp.LEITURAS_JSON, &quot;r+&quot;, encoding=&quot;utf-8&quot;) as f:
+                leituras = json.load(f)
+                leituras.append({&quot;data_envio&quot;: str(datetime.date.today()), &quot;texto&quot;: texto})
+                f.seek(0)
+                json.dump(leituras, f, ensure_ascii=False, indent=2)
+                f.truncate()
+
+            mensagens.append(f&quot;✅ {img_path.name} processada com sucesso!&quot;)
+            img_path.rename(processadas_dir / img_path.name)
+        except Exception as e:
+            mensagens.append(f&quot;❌ Erro em {img_path.name}: {e}&quot;)
+
+    return {&quot;mensagens&quot;: mensagens}
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 enviar_leitura_whatsapp.py</span><pre class='file-content' style='display:none; margin-top:5px;'>import json
+import datetime
+import requests
+import os
+from pathlib import Path
+try:
+    from PIL import Image
+except ImportError:
+    import pip
+    pip.main([&#039;install&#039;, &#039;Pillow&#039;])
+    from PIL import Image
+try:
+    import pytesseract
+except ImportError:
+    import pip
+    pip.main([&#039;install&#039;, &#039;pytesseract&#039;])
+    import pytesseract
+
+# --- Configurações ---
+LEITURAS_DIR = &quot;leituras&quot;
+LEITURAS_JSON = os.path.join(LEITURAS_DIR, &quot;leituras.json&quot;)
+BIBLIA_JSON = &quot;data/nvi.json&quot;
+UPLOADS_DIR = &quot;uploads&quot;
+PROCESSADAS_DIR = os.path.join(UPLOADS_DIR, &quot;processadas&quot;)
+
+# Configuração da API Z-API
+WHATSAPP_API_URL = &quot;https://api.z-api.io/instances/3E9A42A3E2CED133DB7B122EE267B15F/send-text&quot;
+NUMERO_DESTINO = &quot;5521920127396&quot;
+CLIENT_TOKEN = &quot;F0d638864098645e1a66bdab8a41ec07aS&quot;  # Substitua pelo seu token
+
+# --- Funções ---
+def garantir_estrutura():
+    for pasta in [LEITURAS_DIR, UPLOADS_DIR, PROCESSADAS_DIR]:
+        if not os.path.exists(pasta):
+            os.makedirs(pasta)
+            print(f&quot;📂 Criada pasta {pasta}&quot;)
+    if not os.path.exists(LEITURAS_JSON):
+        with open(LEITURAS_JSON, &quot;w&quot;, encoding=&quot;utf-8&quot;) as f:
+            json.dump([], f)
+        print(f&quot;📄 Criado arquivo JSON vazio {LEITURAS_JSON}&quot;)
+
+def processar_imagens_para_json():
+    hoje = datetime.date.today().isoformat()
+    leituras = []
+    for img_path in Path(UPLOADS_DIR).glob(&quot;*.*&quot;):
+        if img_path.is_file():
+            try:
+                texto = pytesseract.image_to_string(Image.open(img_path), lang=&quot;por&quot;)
+                if texto.strip():
+                    leituras.append({&quot;data_envio&quot;: hoje, &quot;texto&quot;: texto.strip()})
+                    print(f&quot;✅ OCR realizado: {img_path}&quot;)
+                # Move a imagem para processadas
+                destino = Path(PROCESSADAS_DIR) / img_path.name
+                img_path.rename(destino)
+            except Exception as e:
+                print(f&quot;❌ Erro ao processar {img_path}: {e}&quot;)
+    if leituras:
+        with open(LEITURAS_JSON, &quot;w&quot;, encoding=&quot;utf-8&quot;) as f:
+            json.dump(leituras, f, ensure_ascii=False, indent=2)
+        print(f&quot;📄 Atualizado {LEITURAS_JSON} com as leituras do dia&quot;)
+    else:
+        print(&quot;⚠️ Nenhum texto extraído das imagens&quot;)
+
+def leituras_do_dia():
+    hoje = datetime.date.today().isoformat()
+    print(f&quot;🔍 Buscando leituras de {hoje} em {LEITURAS_JSON}...&quot;)
+    try:
+        with open(LEITURAS_JSON, &quot;r&quot;, encoding=&quot;utf-8&quot;) as f:
+            leituras = json.load(f)
+        leituras_hoje = [l for l in leituras if l.get(&quot;data_envio&quot;) == hoje]
+        if not leituras_hoje:
+            print(&quot;⚠️ Nenhuma leitura encontrada para hoje.&quot;)
+            return None
+        print(&quot;✅ Leitura encontrada para hoje.&quot;)
+        return leituras_hoje[0].get(&quot;texto&quot;, &quot;&quot;)
+    except Exception as e:
+        print(&quot;❌ Erro ao ler JSON:&quot;, e)
+        return None
+
+def buscar_versiculos_do_texto(texto_ocr: str) -&gt; str:
+    if not os.path.exists(BIBLIA_JSON):
+        print(&quot;❌ Arquivo da Bíblia não encontr
+
+[... arquivo truncado por tamanho ...]</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 enviar_leitura_whatsapp_client_token.py</span><pre class='file-content' style='display:none; margin-top:5px;'>import json
+import datetime
+import os
+import urllib.request
+
+# --- Configurações ---
+# Pasta e arquivo JSON que contém o cronograma das leituras da semana
+LEITURAS_JSON = &quot;leituras/leituras.json&quot;
+
+# Bíblia principal
+BIBLIA_JSON = &quot;data/nvi.json&quot;
+
+# Configuração da API Z-API
+INSTANCE_ID = &quot;3E9A42A3E2CED133DB7B122EE267B15F&quot;
+TOKEN = &quot;B515A074755027E95E2DD22E&quot;
+CLIENT_TOKEN = &quot;F0d638864098645e1a66bdab8a41ec07aS&quot;  # substitua pelo seu token completo
+
+# Número destino (DDI + DDD + número)
+NUMERO_DESTINO = &quot;5521975682548&quot;
+
+# --- Função para pegar a leitura do dia ---
+def leituras_do_dia():
+    hoje = datetime.date.today().isoformat()
+    if not os.path.exists(LEITURAS_JSON):
+        print(f&quot;⚠️ JSON de leituras não encontrado: {LEITURAS_JSON}&quot;)
+        return None
+    with open(LEITURAS_JSON, &quot;r&quot;, encoding=&quot;utf-8&quot;) as f:
+        leituras = json.load(f)
+    leituras_hoje = [l for l in leituras if l.get(&quot;data_envio&quot;) == hoje]
+    if not leituras_hoje:
+        print(&quot;⚠️ Nenhuma leitura encontrada para hoje.&quot;)
+        return None
+    return leituras_hoje[0].get(&quot;texto&quot;, &quot;&quot;)
+
+# --- Função para buscar os versículos completos ---
+def buscar_versiculos_do_texto(texto_ocr: str) -&gt; str:
+    if not os.path.exists(BIBLIA_JSON):
+        print(f&quot;❌ Arquivo da Bíblia não encontrado: {BIBLIA_JSON}&quot;)
+        return &quot;&quot;
+    with open(BIBLIA_JSON, &quot;r&quot;, encoding=&quot;utf-8&quot;) as f:
+        biblia = json.load(f)
+
+    resultado = []
+    linhas = texto_ocr.splitlines()
+
+    for linha in linhas:
+        linha = linha.strip()
+        if not linha or linha.startswith(&quot;DIA&quot;):
+            continue
+        refs = linha.replace(&quot;+&quot;, &quot;,&quot;).replace(&quot;«&quot;, &quot;,&quot;).replace(&quot;e&quot;, &quot;,&quot;).split(&quot;,&quot;)
+        for ref in refs:
+            ref = ref.strip()
+            if not ref or &quot; &quot; not in ref:
+                continue
+            livro, resto = ref.split(&quot; &quot;, 1)
+            if &quot;:&quot; in resto:
+                cap, vers = resto.split(&quot;:&quot;)
+                if &quot;-&quot; in vers:
+                    inicio, fim = map(int, vers.split(&quot;-&quot;))
+                    for i in range(inicio, fim+1):
+                        texto = biblia.get(livro, {}).get(cap, {}).get(str(i), &quot;&quot;)
+                        if texto:
+                            resultado.append(f&quot;{livro} {cap}:{i} — {texto}&quot;)
+                else:
+                    texto = biblia.get(livro, {}).get(cap, {}).get(vers, &quot;&quot;)
+                    if texto:
+                        resultado.append(f&quot;{livro} {cap}:{vers} — {texto}&quot;)
+            else:
+                texto = biblia.get(livro, {}).get(resto, &quot;&quot;)
+                if texto:
+                    resultado.append(f&quot;{livro} {resto} — {texto}&quot;)
+    return &quot;\n&quot;.join(resultado)
+
+# --- Função para enviar via WhatsApp usando Client-Token ---
+def enviar_whatsapp(mensagem: str):
+    url = f&quot;https://api.z-api.io/instances/{INSTANCE_ID}/token/{TOKEN}/send-text&quot;
+    payload = {
+        &quot;phone&quot;: NUMERO_DESTINO,
+        &quot;message&quot;: mensagem
+    }
+    headers = {
+        &quot;Content-Type&quot;: &quot;applic
+
+[... arquivo truncado por tamanho ...]</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 gerar_html.py</span><pre class='file-content' style='display:none; margin-top:5px;'>#!/usr/bin/env python3
+
+import os
+from pathlib import Path
+from html import escape
+
+# Caminho base
+base = Path.cwd()
+saida = base / &quot;projeto.html&quot;
+
+# Extensões a ignorar
+ignore_ext = [&quot;.json&quot;, &quot;.pyc&quot;]
+
+# Diretórios a ignorar
+ignore_dirs = {&#039;.git&#039;, &#039;__pycache__&#039;}
+
+# Cabeçalho HTML
+html = &quot;&quot;&quot;&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;pt-BR&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;UTF-8&quot;&gt;
+&lt;title&gt;📘 Biblia_Desktop - Conteúdo Completo&lt;/title&gt;
+&lt;style&gt;
+body { font-family: &#039;Courier New&#039;, monospace; background: #111; color: #eee; padding: 20px; }
+h1 { color: #6cf; }
+h2 { color: #4af; margin-top: 40px; }
+pre { background: #1c1c1c; padding: 15px; border-radius: 10px; border: 1px solid #333; overflow-x: auto; }
+a { color: #0af; text-decoration: none; }
+a:hover { text-decoration: underline; }
+ul { list-style-type: none; }
+li { margin: 4px 0; }
+small { color: #888; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;h1 id=&quot;topo&quot;&gt;📘 Projeto Biblia_Desktop&lt;/h1&gt;
+&lt;p&gt;&lt;small&gt;Gerado automaticamente com estrutura de diretórios e conteúdo.&lt;/small&gt;&lt;/p&gt;
+&lt;h2&gt;📁 Índice&lt;/h2&gt;
+&lt;ul&gt;
+&quot;&quot;&quot;
+
+# Cria índice
+for root, dirs, files in os.walk(base):
+    dirs[:] = [d for d in dirs if d not in ignore_dirs]  # Ignora pastas
+    for f in files:
+        file_path = Path(root) / f
+        if file_path.suffix.lower() in ignore_ext:
+            continue
+        if file_path == saida:
+            continue  # Ignora o próprio HTML gerado
+        rel_path = file_path.relative_to(base)
+        anchor = str(rel_path).replace(&quot;/&quot;, &quot;_&quot;)
+        html += f&#039;&lt;li&gt;&lt;a href=&quot;#{anchor}&quot;&gt;{rel_path}&lt;/a&gt;&lt;/li&gt;\n&#039;
+
+html += &quot;&lt;/ul&gt;&lt;hr&gt;&quot;
+
+# Mostra estrutura + conteúdo
+for root, dirs, files in os.walk(base):
+    dirs[:] = [d for d in dirs if d not in ignore_dirs]  # Ignora pastas
+    rel_dir = Path(root).relative_to(base)
+    if rel_dir == Path(&quot;.&quot;):
+        html += &quot;&lt;h2&gt;📂 Diretório raiz&lt;/h2&gt;&quot;
+    else:
+        html += f&quot;&lt;h2&gt;📂 {rel_dir}&lt;/h2&gt;&quot;
+
+    if not files:
+        html += &quot;&lt;p&gt;&lt;small&gt;(vazio)&lt;/small&gt;&lt;/p&gt;&quot;
+
+    for f in files:
+        file_path = Path(root) / f
+        if file_path.suffix.lower() in ignore_ext:
+            continue
+        if file_path == saida:
+            continue  # Ignora o próprio HTML gerado
+        try:
+            content = file_path.read_text(encoding=&quot;utf-8&quot;, errors=&quot;ignore&quot;)
+        except Exception as e:
+            content = f&quot;[Erro ao ler o arquivo: {e}]&quot;
+        rel_path = file_path.relative_to(base)
+        anchor = str(rel_path).replace(&quot;/&quot;, &quot;_&quot;)
+        html += f&#039;&lt;h3 id=&quot;{anchor}&quot;&gt;📄 {rel_path}&lt;/h3&gt;&#039;
+        html += f&quot;&lt;pre&gt;{escape(content)}&lt;/pre&gt;&quot;
+
+# Finaliza
+html += &quot;&lt;/body&gt;&lt;/html&gt;&quot;
+
+saida.write_text(html, encoding=&quot;utf-8&quot;)
+print(f&quot;✅ Arquivo HTML completo gerado: {saida}&quot;)
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 main.py</span><pre class='file-content' style='display:none; margin-top:5px;'>from fastapi import FastAPI, Request, Form, UploadFile, File
+from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+import json, os, io, sys
+import enviar_leitura_whatsapp
+from models import LIVROS_NOMES
+
+app = FastAPI()
+
+BASE_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(BASE_DIR, &quot;data&quot;)
+UPLOADS_DIR = os.path.join(BASE_DIR, &quot;uploads&quot;)
+LEITURAS_DIR = os.path.join(BASE_DIR, &quot;leituras&quot;)
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+os.makedirs(LEITURAS_DIR, exist_ok=True)
+
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, &quot;templates&quot;))
+
+# -------------------------------------------------------
+# Funções auxiliares
+# -------------------------------------------------------
+def listar_versoes():
+    return sorted([f.replace(&quot;.json&quot;,&quot;&quot;) for f in os.listdir(DATA_DIR) if f.endswith(&quot;.json&quot;)])
+
+def carregar_biblia(versao):
+    caminho = os.path.join(DATA_DIR, f&quot;{versao}.json&quot;)
+    if not os.path.exists(caminho):
+        return []
+    with open(caminho, &quot;r&quot;, encoding=&quot;utf-8-sig&quot;) as f:
+        return json.load(f)
+
+# -------------------------------------------------------
+# Middleware estático
+# -------------------------------------------------------
+app.mount(&quot;/static&quot;, StaticFiles(directory=os.path.join(BASE_DIR, &quot;static&quot;)), name=&quot;static&quot;)
+
+# -------------------------------------------------------
+# Variável global simples (substitui session do Flask)
+# -------------------------------------------------------
+versao_atual = &quot;nvi&quot;
+
+# -------------------------------------------------------
+# Rotas principais
+# -------------------------------------------------------
+@app.get(&quot;/&quot;, response_class=HTMLResponse)
+async def index(request: Request):
+    return RedirectResponse(url=request.url_for(&quot;livros&quot;))
+
+@app.get(&quot;/livros&quot;, response_class=HTMLResponse)
+async def livros(request: Request):
+    biblia = carregar_biblia(versao_atual)
+    return templates.TemplateResponse(&quot;livros.html&quot;, {
+        &quot;request&quot;: request,
+        &quot;livros&quot;: biblia,
+        &quot;versao&quot;: versao_atual,
+        &quot;versoes&quot;: listar_versoes(),
+        &quot;LIVROS_NOMES&quot;: LIVROS_NOMES
+    })
+
+@app.get(&quot;/trocar_versao&quot;, response_class=HTMLResponse)
+async def trocar_versao(request: Request, versao: str = &quot;nvi&quot;):
+    global versao_atual
+    if versao in listar_versoes():
+        versao_atual = versao
+    return RedirectResponse(url=request.url_for(&quot;livros&quot;))
+
+@app.get(&quot;/capitulos/{livro_abrev}&quot;, response_class=HTMLResponse)
+async def capitulos(request: Request, livro_abrev: str):
+    biblia = carregar_biblia(versao_atual)
+    livro = next((l for l in biblia if l.get(&quot;abbrev&quot;) == livro_abrev), None)
+    if not livro:
+        return HTMLResponse(&quot;Livro não encontrado&quot;, status_code=404)
+    total = len(livro.get(&quot;chapters&quot;, []))
+    return templates.TemplateResponse(&quot;capitulos.html&quot;, {
+        &quot;request&quot;: request,
+        &quot;livro&quot;: livro,
+        &quot;total&quot;: total,
+        &quot;versao&quot;:
+
+[... arquivo truncado por tamanho ...]</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 models.py</span><pre class='file-content' style='display:none; margin-top:5px;'>﻿import json
+
+LIVROS_NOMES = {
+&#039;Gn&#039;:&#039;Gênesis&#039;,&#039;Ex&#039;:&#039;Êxodo&#039;
+}
+
+class Versiculo:
+    def __init__(self,numero,texto): self.numero=numero; self.texto=texto
+class Capitulo:
+    def __init__(self,numero): self.numero=numero; self.versiculos=[]
+    def adicionar_versiculo(self,texto): self.versiculos.append(Versiculo(len(self.versiculos)+1,texto))
+    def get_versiculo(self,numero):
+        if 1&lt;=numero&lt;=len(self.versiculos): return self.versiculos[numero-1]
+        return None
+class Livro:
+    def __init__(self,abreviacao):
+        self.abrev=abreviacao
+        self.nome=LIVROS_NOMES.get(abreviacao,abreviacao.capitalize())
+        self.capitulos=[]
+    def adicionar_capitulo(self,capitulo): self.capitulos.append(capitulo)
+    def get_capitulo(self,numero):
+        if 1&lt;=numero&lt;=len(self.capitulos): return self.capitulos[numero-1]
+        return None
+def carregar_biblia(caminho_arquivo):
+    with open(caminho_arquivo,&#039;r&#039;,encoding=&#039;utf-8-sig&#039;) as f: biblia_json=json.load(f)
+    livros=[]
+    for livro_data in biblia_json:
+        livro=Livro(livro_data[&#039;abbrev&#039;])
+        for i,cap in enumerate(livro_data[&#039;chapters&#039;],1):
+            c=Capitulo(i)
+            for v in cap: c.adicionar_versiculo(v)
+            livro.adicionar_capitulo(c)
+        livros.append(livro)
+    return livros
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 requirements.txt</span><pre class='file-content' style='display:none; margin-top:5px;'>fastapi
+uvicorn
+jinja2
+pillow
+pytesseract
+python-multipart
+itsdangerous
+requests
+</pre></li><li><span class='folder' onclick='toggleFolder(this)'>📁 static</span><ul style='list-style:none;padding-left:20px;'><li><span class='folder' onclick='toggleFolder(this)'>📁 bootstrap</span><ul style='list-style:none;padding-left:40px;'><li><span class='folder' onclick='toggleFolder(this)'>📁 css</span><ul style='list-style:none;padding-left:60px;'><li><span class='file' onclick='toggleFile(this)'>📄 bootstrap.min.css</span><pre class='file-content' style='display:none; margin-top:5px;'>@charset &quot;UTF-8&quot;;/*!
+ * Bootstrap  v5.3.2 (https://getbootstrap.com/)
+ * Copyright 2011-2023 The Bootstrap Authors
+ * Licensed under MIT (https://github.com/twbs/bootstrap/blob/main/LICENSE)
+ */:root,[data-bs-theme=light]{--bs-blue:#0d6efd;--bs-indigo:#6610f2;--bs-purple:#6f42c1;--bs-pink:#d63384;--bs-red:#dc3545;--bs-orange:#fd7e14;--bs-yellow:#ffc107;--bs-green:#198754;--bs-teal:#20c997;--bs-cyan:#0dcaf0;--bs-black:#000;--bs-white:#fff;--bs-gray:#6c757d;--bs-gray-dark:#343a40;--bs-gray-100:#f8f9fa;--bs-gray-200:#e9ecef;--bs-gray-300:#dee2e6;--bs-gray-400:#ced4da;--bs-gray-500:#adb5bd;--bs-gray-600:#6c757d;--bs-gray-700:#495057;--bs-gray-800:#343a40;--bs-gray-900:#212529;--bs-primary:#0d6efd;--bs-secondary:#6c757d;--bs-success:#198754;--bs-info:#0dcaf0;--bs-warning:#ffc107;--bs-danger:#dc3545;--bs-light:#f8f9fa;--bs-dark:#212529;--bs-primary-rgb:13,110,253;--bs-secondary-rgb:108,117,125;--bs-success-rgb:25,135,84;--bs-info-rgb:13,202,240;--bs-warning-rgb:255,193,7;--bs-danger-rgb:220,53,69;--bs-light-rgb:248,249,250;--bs-dark-rgb:33,37,41;--bs-primary-text-emphasis:#052c65;--bs-secondary-text-emphasis:#2b2f32;--bs-success-text-emphasis:#0a3622;--bs-info-text-emphasis:#055160;--bs-warning-text-emphasis:#664d03;--bs-danger-text-emphasis:#58151c;--bs-light-text-emphasis:#495057;--bs-dark-text-emphasis:#495057;--bs-primary-bg-subtle:#cfe2ff;--bs-secondary-bg-subtle:#e2e3e5;--bs-success-bg-subtle:#d1e7dd;--bs-info-bg-subtle:#cff4fc;--bs-warning-bg-subtle:#fff3cd;--bs-danger-bg-subtle:#f8d7da;--bs-light-bg-subtle:#fcfcfd;--bs-dark-bg-subtle:#ced4da;--bs-primary-border-subtle:#9ec5fe;--bs-secondary-border-subtle:#c4c8cb;--bs-success-border-subtle:#a3cfbb;--bs-info-border-subtle:#9eeaf9;--bs-warning-border-subtle:#ffe69c;--bs-danger-border-subtle:#f1aeb5;--bs-light-border-subtle:#e9ecef;--bs-dark-border-subtle:#adb5bd;--bs-white-rgb:255,255,255;--bs-black-rgb:0,0,0;--bs-font-sans-serif:system-ui,-apple-system,&quot;Segoe UI&quot;,Roboto,&quot;Helvetica Neue&quot;,&quot;Noto Sans&quot;,&quot;Liberation Sans&quot;,Arial,sans-serif,&quot;Apple Color Emoji&quot;,&quot;Segoe UI Emoji&quot;,&quot;Segoe UI Symbol&quot;,&quot;Noto Color Emoji&quot;;--bs-font-monospace:SFMono-Regular,Menlo,Monaco,Consolas,&quot;Liberation Mono&quot;,&quot;Courier New&quot;,monospace;--bs-gradient:linear-gradient(180deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0));--bs-body-font-family:var(--bs-font-sans-serif);--bs-body-font-size:1rem;--bs-body-font-weight:400;--bs-body-line-height:1.5;--bs-body-color:#212529;--bs-body-color-rgb:33,37,41;--bs-body-bg:#fff;--bs-body-bg-rgb:255,255,255;--bs-emphasis-color:#000;--bs-emphasis-color-rgb:0,0,0;--bs-secondary-color:rgba(33, 37, 41, 0.75);--bs-secondary-color-rgb:33,37,41;--bs-secondary-bg:#e9ecef;--bs-secondary-bg-rgb:233,236,239;--bs-tertiary-color:rgba(33, 37, 41, 0.5);--bs-tertiary-color-rgb:33,37,41;--bs-tertiary-bg:#f8f9fa;--bs-tertiary-bg-rgb:248,249,250;--bs-heading-color:inherit;--bs-link-color:#0d6efd;--bs-link-color-rgb:13,110,253;--bs-link-decoration:underline;--bs-link-hover-color:#0a58ca;--bs-link-hover-color-rgb:
+
+[... arquivo truncado por tamanho ...]</pre></li></ul></li><li><span class='folder' onclick='toggleFolder(this)'>📁 js</span><ul style='list-style:none;padding-left:60px;'><li><span class='file' onclick='toggleFile(this)'>📄 bootstrap.bundle.min.js</span><pre class='file-content' style='display:none; margin-top:5px;'>/*!
+  * Bootstrap v5.3.2 (https://getbootstrap.com/)
+  * Copyright 2011-2023 The Bootstrap Authors (https://github.com/twbs/bootstrap/graphs/contributors)
+  * Licensed under MIT (https://github.com/twbs/bootstrap/blob/main/LICENSE)
+  */
+!function(t,e){&quot;object&quot;==typeof exports&amp;&amp;&quot;undefined&quot;!=typeof module?module.exports=e():&quot;function&quot;==typeof define&amp;&amp;define.amd?define(e):(t=&quot;undefined&quot;!=typeof globalThis?globalThis:t||self).bootstrap=e()}(this,(function(){&quot;use strict&quot;;const t=new Map,e={set(e,i,n){t.has(e)||t.set(e,new Map);const s=t.get(e);s.has(i)||0===s.size?s.set(i,n):console.error(`Bootstrap doesn&#039;t allow more than one instance per element. Bound instance: ${Array.from(s.keys())[0]}.`)},get:(e,i)=&gt;t.has(e)&amp;&amp;t.get(e).get(i)||null,remove(e,i){if(!t.has(e))return;const n=t.get(e);n.delete(i),0===n.size&amp;&amp;t.delete(e)}},i=&quot;transitionend&quot;,n=t=&gt;(t&amp;&amp;window.CSS&amp;&amp;window.CSS.escape&amp;&amp;(t=t.replace(/#([^\s&quot;#&#039;]+)/g,((t,e)=&gt;`#${CSS.escape(e)}`))),t),s=t=&gt;{t.dispatchEvent(new Event(i))},o=t=&gt;!(!t||&quot;object&quot;!=typeof t)&amp;&amp;(void 0!==t.jquery&amp;&amp;(t=t[0]),void 0!==t.nodeType),r=t=&gt;o(t)?t.jquery?t[0]:t:&quot;string&quot;==typeof t&amp;&amp;t.length&gt;0?document.querySelector(n(t)):null,a=t=&gt;{if(!o(t)||0===t.getClientRects().length)return!1;const e=&quot;visible&quot;===getComputedStyle(t).getPropertyValue(&quot;visibility&quot;),i=t.closest(&quot;details:not([open])&quot;);if(!i)return e;if(i!==t){const e=t.closest(&quot;summary&quot;);if(e&amp;&amp;e.parentNode!==i)return!1;if(null===e)return!1}return e},l=t=&gt;!t||t.nodeType!==Node.ELEMENT_NODE||!!t.classList.contains(&quot;disabled&quot;)||(void 0!==t.disabled?t.disabled:t.hasAttribute(&quot;disabled&quot;)&amp;&amp;&quot;false&quot;!==t.getAttribute(&quot;disabled&quot;)),c=t=&gt;{if(!document.documentElement.attachShadow)return null;if(&quot;function&quot;==typeof t.getRootNode){const e=t.getRootNode();return e instanceof ShadowRoot?e:null}return t instanceof ShadowRoot?t:t.parentNode?c(t.parentNode):null},h=()=&gt;{},d=t=&gt;{t.offsetHeight},u=()=&gt;window.jQuery&amp;&amp;!document.body.hasAttribute(&quot;data-bs-no-jquery&quot;)?window.jQuery:null,f=[],p=()=&gt;&quot;rtl&quot;===document.documentElement.dir,m=t=&gt;{var e;e=()=&gt;{const e=u();if(e){const i=t.NAME,n=e.fn[i];e.fn[i]=t.jQueryInterface,e.fn[i].Constructor=t,e.fn[i].noConflict=()=&gt;(e.fn[i]=n,t.jQueryInterface)}},&quot;loading&quot;===document.readyState?(f.length||document.addEventListener(&quot;DOMContentLoaded&quot;,(()=&gt;{for(const t of f)t()})),f.push(e)):e()},g=(t,e=[],i=t)=&gt;&quot;function&quot;==typeof t?t(...e):i,_=(t,e,n=!0)=&gt;{if(!n)return void g(t);const o=(t=&gt;{if(!t)return 0;let{transitionDuration:e,transitionDelay:i}=window.getComputedStyle(t);const n=Number.parseFloat(e),s=Number.parseFloat(i);return n||s?(e=e.split(&quot;,&quot;)[0],i=i.split(&quot;,&quot;)[0],1e3*(Number.parseFloat(e)+Number.parseFloat(i))):0})(e)+5;let r=!1;const a=({target:n})=&gt;{n===e&amp;&amp;(r=!0,e.removeEventListener(i,a),g(t))};e.addEventListener(i,a),setTimeout((()=&gt;{r||s(e)}),o)},b=(t,e,i,n)=&gt;{const s=t.length;let o=t.indexOf(e);return-1===o?!i&amp;&amp;n?t[s-1]:t[0]:(o+=i?1:-1,n&amp;&amp;(o=(o+s)%s),t[Math.max(0,Math.min(o,s-1))])},v=/[^.]*(?=\..*)\.|.*/,y=/\..*/,w=/::\d+$/,A={};let E=1;const T={mouseenter:
+
+[... arquivo truncado por tamanho ...]</pre></li></ul></li></ul></li></ul></li><li><span class='folder' onclick='toggleFolder(this)'>📁 templates</span><ul style='list-style:none;padding-left:20px;'><li><span class='file' onclick='toggleFile(this)'>📄 base.html</span><pre class='file-content' style='display:none; margin-top:5px;'>&lt;!doctype html&gt;
+&lt;html lang=&quot;pt-BR&quot;&gt;
+&lt;head&gt;
+  &lt;meta charset=&quot;utf-8&quot;&gt;
+  &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width,initial-scale=1&quot;&gt;
+  &lt;title&gt;Bíblia&lt;/title&gt;
+  &lt;link rel=&quot;stylesheet&quot; href=&quot;/static/bootstrap/css/bootstrap.min.css&quot;&gt;
+  &lt;style&gt;
+    /* pequenas melhorias visuais */
+    .book-grid .btn { min-height: 40px; border-radius: 12px; }
+    .verse-grid .btn { min-width: 44px; min-height: 40px; border-radius: 8px; }
+    .verse-grid .btn.selected { background-color: #ffc107 !important; color:#000 !important; }
+    #selecionados { max-height: 220px; overflow:auto; white-space:pre-wrap; }
+    .verses-card { max-height: 50vh; overflow:auto; }
+  &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;nav class=&quot;navbar navbar-expand-lg navbar-light bg-light mb-3&quot;&gt;
+  &lt;div class=&quot;container-fluid&quot;&gt;
+    &lt;a class=&quot;navbar-brand&quot; href=&quot;/livros&quot;&gt;📖 Bíblia&lt;/a&gt;
+
+    &lt;div class=&quot;d-flex align-items-center ms-auto&quot;&gt;
+      &lt;select id=&quot;versaoSelect&quot; class=&quot;form-select form-select-sm me-2&quot; style=&quot;width:120px;&quot;&gt;
+        {% for v in versoes %}
+          &lt;option value=&quot;{{ v }}&quot; {% if v==versao %}selected{% endif %}&gt;{{ v.upper() }}&lt;/option&gt;
+        {% endfor %}
+      &lt;/select&gt;
+
+      &lt;a class=&quot;btn btn-outline-secondary ms-2&quot; href=&quot;/upload?versao={{ versao }}&quot;&gt;Enviar Cronograma&lt;/a&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/nav&gt;
+
+&lt;div class=&quot;container&quot;&gt;
+  {% block content %}{% endblock %}
+&lt;/div&gt;
+
+&lt;script src=&quot;/static/bootstrap/js/bootstrap.bundle.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+document.getElementById(&#039;versaoSelect&#039;)?.addEventListener(&#039;change&#039;, function(){
+  const v = this.value;
+  const url = new URL(window.location.href);
+  url.pathname = &#039;/trocar_versao&#039;;
+  url.searchParams.set(&#039;versao&#039;, v);
+  window.location.href = url.toString();
+});
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 capitulos.html</span><pre class='file-content' style='display:none; margin-top:5px;'>{% extends &#039;base.html&#039; %}
+{% block content %}
+&lt;div class=&quot;text-center mb-4&quot;&gt;
+  {% if livro.abbrev is defined %}
+    &lt;h2&gt;{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }}&lt;/h2&gt;
+  {% else %}
+    &lt;h2&gt;{{ LIVROS_NOMES.get(livro[&quot;abbrev&quot;], livro.get(&quot;name&quot;, livro[&quot;abbrev&quot;])) }}&lt;/h2&gt;
+  {% endif %}
+  &lt;p&gt;Selecione um capítulo&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;row row-cols-3 row-cols-md-6 g-3&quot;&gt;
+  {% for i in range(1, total + 1) %}
+  &lt;div class=&quot;col&quot;&gt;
+    {% if livro.abbrev is defined %}
+      &lt;a href=&#039;{{ request.url_for(&quot;versiculos&quot;, livro_abrev=livro.abbrev, capitulo=i) }}?versao={{ versao }}&#039;
+         class=&quot;btn btn-success w-100&quot;&gt;Capítulo {{ i }}&lt;/a&gt;
+    {% else %}
+      &lt;a href=&#039;{{ request.url_for(&quot;versiculos&quot;, livro_abrev=livro[&quot;abbrev&quot;], capitulo=i) }}?versao={{ versao }}&#039;
+         class=&quot;btn btn-success w-100&quot;&gt;Capítulo {{ i }}&lt;/a&gt;
+    {% endif %}
+  &lt;/div&gt;
+  {% endfor %}
+&lt;/div&gt;
+
+&lt;div class=&quot;mt-3&quot;&gt;
+  &lt;a href=&quot;/livros?versao={{ versao }}&quot; class=&quot;btn btn-link&quot;&gt;⬅ Voltar&lt;/a&gt;
+&lt;/div&gt;
+{% endblock %}
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 livros.html</span><pre class='file-content' style='display:none; margin-top:5px;'>{% extends &#039;base.html&#039; %}
+{% block content %}
+&lt;div class=&quot;text-center my-3&quot;&gt;
+  &lt;h1&gt;📖 Bíblia — {{ versao|upper }}&lt;/h1&gt;
+  &lt;p class=&quot;lead&quot;&gt;Escolha um livro&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;row book-grid g-3&quot;&gt;
+  {% for livro in livros %}
+    &lt;div class=&quot;col-6 col-md-4 col-lg-3&quot;&gt;
+      {% if livro.abbrev is defined %}
+        &lt;a href=&#039;{{ request.url_for(&quot;capitulos&quot;, livro_abrev=livro.abbrev) }}?versao={{ versao }}&#039;
+           class=&quot;btn btn-primary w-100 text-start&quot;&gt;
+          {{ LIVROS_NOMES.get(livro.abbrev, livro.get(&quot;name&quot;, livro.abbrev)) }}
+        &lt;/a&gt;
+      {% else %}
+        &lt;a href=&#039;{{ request.url_for(&quot;capitulos&quot;, livro_abrev=livro[&quot;abbrev&quot;]) }}?versao={{ versao }}&#039;
+           class=&quot;btn btn-primary w-100 text-start&quot;&gt;
+          {{ LIVROS_NOMES.get(livro[&quot;abbrev&quot;], livro.get(&quot;name&quot;, livro[&quot;abbrev&quot;])) }}
+        &lt;/a&gt;
+      {% endif %}
+    &lt;/div&gt;
+  {% else %}
+    &lt;p class=&quot;text-muted&quot;&gt;Nenhum livro encontrado.&lt;/p&gt;
+  {% endfor %}
+&lt;/div&gt;
+{% endblock %}
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 upload.html</span><pre class='file-content' style='display:none; margin-top:5px;'>{% extends &quot;base.html&quot; %}
+{% block content %}
+&lt;div class=&quot;container mt-4 text-center&quot;&gt;
+  &lt;h2&gt;📤 Enviar Cronograma&lt;/h2&gt;
+  &lt;form method=&quot;post&quot; enctype=&quot;multipart/form-data&quot; action=&quot;/upload&quot;&gt;
+    &lt;div class=&quot;mb-3 mt-3&quot;&gt;
+      &lt;input type=&quot;file&quot; name=&quot;file&quot; accept=&quot;image/*&quot; class=&quot;form-control&quot; required&gt;
+    &lt;/div&gt;
+    &lt;button type=&quot;submit&quot; class=&quot;btn btn-success px-4 py-2&quot;&gt;Enviar&lt;/button&gt;
+  &lt;/form&gt;
+
+  {% if mensagem %}
+    &lt;div class=&quot;alert alert-info mt-3&quot;&gt;{{ mensagem }}&lt;/div&gt;
+  {% endif %}
+
+  {% if texto_extraido %}
+    &lt;h5 class=&quot;mt-4&quot;&gt;📝 Texto extraído:&lt;/h5&gt;
+    &lt;pre class=&quot;text-start bg-light p-3 rounded&quot; style=&quot;white-space: pre-wrap;&quot;&gt;{{ texto_extraido }}&lt;/pre&gt;
+  {% endif %}
+&lt;/div&gt;
+{% endblock %}
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 versiculos.html</span><pre class='file-content' style='display:none; margin-top:5px;'>{% extends &#039;base.html&#039; %}
+{% block content %}
+&lt;div class=&quot;mb-3 text-center&quot;&gt;
+  {% if livro.abbrev is defined %}
+    &lt;h2&gt;{{ LIVROS_NOMES.get(livro.abbrev, livro.abbrev) }} — Capítulo {{ capitulo }}&lt;/h2&gt;
+  {% else %}
+    &lt;h2&gt;{{ LIVROS_NOMES.get(livro[&quot;abbrev&quot;], livro.get(&quot;name&quot;, livro[&quot;abbrev&quot;])) }} — Capítulo {{ capitulo }}&lt;/h2&gt;
+  {% endif %}
+&lt;/div&gt;
+
+&lt;div class=&quot;card p-3&quot;&gt;
+  &lt;div class=&quot;mb-3&quot;&gt;
+    &lt;div class=&quot;d-flex justify-content-between align-items-center&quot;&gt;
+      &lt;div&gt;
+        &lt;button id=&quot;selectModeBtn&quot; class=&quot;btn btn-outline-secondary btn-sm&quot;&gt;Ativar seleção (segurar + arrastar)&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div&gt;
+        &lt;button id=&quot;clearSelection&quot; class=&quot;btn btn-sm btn-danger&quot;&gt;Limpar&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Grid de números de versículos --&gt;
+  &lt;div id=&quot;verseGrid&quot; class=&quot;d-flex flex-wrap gap-2 verse-grid&quot;&gt;
+    {% for v in versiculos %}
+      {% set idx = loop.index %}
+      &lt;button class=&quot;btn btn-outline-primary&quot; data-index=&quot;{{ idx }}&quot; data-text=&quot;{{ v|e }}&quot;&gt;
+        {{ idx }}
+      &lt;/button&gt;
+    {% endfor %}
+  &lt;/div&gt;
+
+  &lt;!-- Versículos selecionados --&gt;
+  &lt;div class=&quot;mt-4&quot;&gt;
+    &lt;h5&gt;Versículos selecionados&lt;/h5&gt;
+    &lt;div class=&quot;card p-2 verses-card&quot;&gt;
+      &lt;div id=&quot;selecionados&quot;&gt;&lt;small&gt;Nenhum versículo selecionado.&lt;/small&gt;&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;mt-3&quot;&gt;
+  &lt;a href=&quot;{{ request.url_for(&#039;capitulos&#039;, livro_abrev=(livro.abbrev if livro.abbrev is defined else livro[&#039;abbrev&#039;])) }}?versao={{ versao }}&quot; class=&quot;btn btn-link&quot;&gt;⬅ Voltar&lt;/a&gt;
+&lt;/div&gt;
+
+&lt;script&gt;
+/* Detecção mobile */
+const isTouch = (&#039;ontouchstart&#039; in window) || navigator.maxTouchPoints &gt; 0;
+
+/* Elementos */
+const verseGrid = document.getElementById(&#039;verseGrid&#039;);
+const selecionadosDiv = document.getElementById(&#039;selecionados&#039;);
+const btnSelectMode = document.getElementById(&#039;selectModeBtn&#039;);
+const btnClear = document.getElementById(&#039;clearSelection&#039;);
+
+let selecting = false;      // modo seleção ativado
+let longPressTimer = null;
+let touched = false;
+let selectedIndexes = new Set();
+
+/* Helpers */
+function updateSelecionados() {
+  if (selectedIndexes.size === 0) {
+    selecionadosDiv.innerHTML = &#039;&lt;small&gt;Nenhum versículo selecionado.&lt;/small&gt;&#039;;
+    return;
+  }
+  // ordena por índice
+  const idxs = Array.from(selectedIndexes).map(Number).sort((a,b)=&gt;a-b);
+  const texts = idxs.map(i =&gt; {
+    const btn = verseGrid.querySelector(&#039;[data-index=&quot;&#039;+i+&#039;&quot;]&#039;);
+    return i + &#039;. &#039; + (btn ? btn.dataset.text : &#039;&#039;);
+  });
+  selecionadosDiv.textContent = texts.join(&#039;\\n\\n&#039;);
+}
+
+function toggleButton(btn, state) {
+  if (state === undefined) btn.classList.toggle(&#039;selected&#039;);
+  else if (state) btn.classList.add(&#039;selected&#039;);
+  else btn.classList.remove(&#039;selected&#039;);
+}
+
+/* Eventos ao clicar / tocar nos botões (click para desktop, toque longo para mobile) */
+verseGrid.addEventListener(&#039;click&#039;, (e) =&gt; {
+  const btn = e.target.closest(&#039;button[data-index]&#039;);
+  if (!btn) return;
+  // se mobile e modo seleção está desativado, considera apenas toggle simples
+  i
+
+[... arquivo truncado por tamanho ...]</pre></li></ul></li></ul>
+<script>
+function toggleFolder(el) {
+    let next = el.nextElementSibling;
+    if (!next) return;
+    next.style.display = (next.style.display === 'none' || next.style.display === '') ? 'block' : 'none';
+}
+function toggleFile(el) {
+    let next = el.nextElementSibling;
+    if (!next) return;
+    next.style.display = (next.style.display === 'none' || next.style.display === '') ? 'block' : 'none';
+}
+</script>
+</body>
+</html>
