@@ -1,13 +1,16 @@
-from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
+from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, Query
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import json, os, io, sys
+from fastapi.middleware.cors import CORSMiddleware
+import json, os, io
 import enviar_leitura_whatsapp
 from models import LIVROS_NOMES
 
+# -------------------------------------------------------
+# Configuração base
+# -------------------------------------------------------
 app = FastAPI()
-
 BASE_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(BASE_DIR, "data")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -18,15 +21,26 @@ os.makedirs(LEITURAS_DIR, exist_ok=True)
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # -------------------------------------------------------
+# CORS (para o app Kivy ou outro cliente)
+# -------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # em produção, restrinja
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# -------------------------------------------------------
 # Funções auxiliares
 # -------------------------------------------------------
 def listar_versoes():
-    return sorted([f.replace(".json","") for f in os.listdir(DATA_DIR) if f.endswith(".json")])
+    return sorted([f.replace(".json", "") for f in os.listdir(DATA_DIR) if f.endswith(".json")])
 
 def carregar_biblia(versao):
     caminho = os.path.join(DATA_DIR, f"{versao}.json")
     if not os.path.exists(caminho):
-        return []
+        raise FileNotFoundError(f"Versão {versao} não encontrada.")
     with open(caminho, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
@@ -41,7 +55,7 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 versao_atual = "nvi"
 
 # -------------------------------------------------------
-# Rotas principais
+# Rotas HTML existentes
 # -------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -81,77 +95,57 @@ async def capitulos(request: Request, livro_abrev: str):
         "LIVROS_NOMES": LIVROS_NOMES
     })
 
-@app.get("/versiculos/{livro_abrev}/{capitulo}", response_class=HTMLResponse)
-async def versiculos(request: Request, livro_abrev: str, capitulo: int):
-    biblia = carregar_biblia(versao_atual)
-    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
+# -------------------------------------------------------
+# API JSON (para consumo pelo Kivy ou outros)
+# -------------------------------------------------------
+
+@app.get("/api/versions")
+async def api_versions():
+    """Lista as versões de Bíblia disponíveis"""
+    return {"versions": listar_versoes()}
+
+@app.get("/api/books")
+async def api_books(versao: str = Query(...)):
+    """Retorna todos os livros de uma versão"""
+    try:
+        biblia = carregar_biblia(versao)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    books = [{"abbrev": l.get("abbrev"), "name": l.get("name", l.get("abbrev"))} for l in biblia]
+    return {"books": books}
+
+@app.get("/api/chapters")
+async def api_chapters(versao: str = Query(...), book: str = Query(...)):
+    """Retorna os capítulos de um livro"""
+    try:
+        biblia = carregar_biblia(versao)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    livro = next((l for l in biblia if l.get("abbrev") == book), None)
     if not livro:
-        return HTMLResponse("Livro não encontrado", status_code=404)
+        raise HTTPException(status_code=404, detail="Livro não encontrado")
+    total = len(livro.get("chapters", []))
+    return {"book": book, "chapters": list(range(1, total + 1))}
+
+@app.get("/api/verses")
+async def api_verses(versao: str = Query(...), book: str = Query(...), chapter: int = Query(...)):
+    """Retorna os versículos de um capítulo"""
+    try:
+        biblia = carregar_biblia(versao)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    livro = next((l for l in biblia if l.get("abbrev") == book), None)
+    if not livro:
+        raise HTTPException(status_code=404, detail="Livro não encontrado")
+
     chapters = livro.get("chapters", [])
-    if capitulo < 1 or capitulo > len(chapters):
-        return HTMLResponse("Capítulo não encontrado", status_code=404)
-    versiculos = chapters[capitulo - 1]
-    return templates.TemplateResponse("versiculos.html", {
-        "request": request,
-        "livro": livro,
-        "capitulo": capitulo,
-        "versiculos": versiculos,
-        "versao": versao_atual,
-        "versoes": listar_versoes(),
-        "LIVROS_NOMES": LIVROS_NOMES
-    })
+    if chapter < 1 or chapter > len(chapters):
+        raise HTTPException(status_code=400, detail="Capítulo inválido")
 
-# -------------------------------------------------------
-# Upload de imagem do cronograma (OCR)
-# -------------------------------------------------------
-@app.get("/upload", response_class=HTMLResponse)
-async def upload_form(request: Request):
-    return templates.TemplateResponse("upload.html", {"request": request})
+    verses = chapters[chapter - 1]
+    enumerated = [{"index": i + 1, "text": v} for i, v in enumerate(verses)]
+    return {"book": book, "chapter": chapter, "verses": enumerated}
 
-@app.post("/upload", response_class=HTMLResponse)
-async def upload_cronograma(request: Request, file: UploadFile = File(...)):
-    try:
-        conteudo = await file.read()
-        caminho = os.path.join(UPLOADS_DIR, file.filename)
-        with open(caminho, "wb") as f:
-            f.write(conteudo)
-        mensagem = f"Imagem '{file.filename}' enviada com sucesso!"
-        # Aqui você pode chamar sua função de OCR e salvar no leituras.json
-        # Exemplo: enviar_leitura_whatsapp.processar_imagem(caminho)
-    except Exception as e:
-        mensagem = f"Erro ao processar a imagem: {e}"
-    return templates.TemplateResponse("upload.html", {"request": request, "mensagem": mensagem})
-
-# -------------------------------------------------------
-# Rotas para envio do versículo do dia
-# -------------------------------------------------------
-@app.get("/enviar_versiculo")
-def enviar_versiculo():
-    buffer = io.StringIO()
-    sys.stdout = buffer
-    try:
-        enviar_leitura_whatsapp.main()
-    except Exception as e:
-        print("❌ Erro:", e)
-    finally:
-        sys.stdout = sys.__stdout__
-    return {"status": "Execução realizada, verifique os logs para detalhes"}
-
-@app.get("/testar_whatsapp", response_class=PlainTextResponse)
-def testar_whatsapp():
-    buffer = io.StringIO()
-    sys.stdout = buffer
-    try:
-        enviar_leitura_whatsapp.main()
-    except Exception as e:
-        print("❌ Erro:", e)
-    finally:
-        sys.stdout = sys.__stdout__
-    return buffer.getvalue()
-
-# -------------------------------------------------------
-# Inicialização
-# -------------------------------------------------------
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
