@@ -50,102 +50,54 @@ def carregar_biblia(versao):
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 # -------------------------------------------------------
-# Variável global simples (substitui session do Flask)
+# VERSÃO ORIGINAL (ANTES) — NÃO REDIRECIONAVA PARA A MESMA PÁGINA
 # -------------------------------------------------------
-versao_atual = "nvi"
-
-# -------------------------------------------------------
-# Rotas HTML existentes
-# -------------------------------------------------------
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return RedirectResponse(url=request.url_for("livros"))
-
-@app.get("/livros", response_class=HTMLResponse)
-async def livros(request: Request):
-    biblia = carregar_biblia(versao_atual)
-    return templates.TemplateResponse("livros.html", {
-        "request": request,
-        "livros": biblia,
-        "versao": versao_atual,
-        "versoes": listar_versoes(),
-        "LIVROS_NOMES": LIVROS_NOMES
-    })
-
-@app.get("/trocar_versao", response_class=HTMLResponse)
-async def trocar_versao(request: Request, versao: str = "nvi"):
-    global versao_atual
-    if versao in listar_versoes():
-        versao_atual = versao
-    return RedirectResponse(url=request.url_for("livros"))
-
-@app.get("/capitulos/{livro_abrev}", response_class=HTMLResponse)
-async def capitulos(request: Request, livro_abrev: str):
-    biblia = carregar_biblia(versao_atual)
-    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
-    if not livro:
-        return HTMLResponse("Livro não encontrado", status_code=404)
-    total = len(livro.get("chapters", []))
-    return templates.TemplateResponse("capitulos.html", {
-        "request": request,
-        "livro": livro,
-        "total": total,
-        "versao": versao_atual,
-        "versoes": listar_versoes(),
-        "LIVROS_NOMES": LIVROS_NOMES
-    })
-
-# -------------------------------------------------------
-# API JSON (para consumo pelo Kivy ou outros)
+# VERSAO_ATUAL = "nvi"
+# @app.get("/trocar_versao")
+# async def trocar_versao_antigo(versao: str = Query("nvi")):
+#     global VERSAO_ATUAL
+#     VERSAO_ATUAL = versao
+#     return RedirectResponse("/livros")
+#
+# OBS: Esse código SEMPRE mandava para /livros.
 # -------------------------------------------------------
 
-@app.get("/api/versions")
-async def api_versions():
-    """Lista as versões de Bíblia disponíveis"""
-    return {"versions": listar_versoes()}
 
-@app.get("/api/books")
-async def api_books(versao: str = Query(...)):
-    """Retorna todos os livros de uma versão"""
-    try:
-        biblia = carregar_biblia(versao)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Versão não encontrada")
+# -------------------------------------------------------
+# VERSÃO NOVA (DEPOIS) — AGORA VOLTA PARA A MESMA PÁGINA
+# -------------------------------------------------------
 
-    books = [{"abbrev": l.get("abbrev"), "name": l.get("name", l.get("abbrev"))} for l in biblia]
-    return {"books": books}
+VERSAO_ATUAL = "nvi"
 
-@app.get("/api/chapters")
-async def api_chapters(versao: str = Query(...), book: str = Query(...)):
-    """Retorna os capítulos de um livro"""
-    try:
-        biblia = carregar_biblia(versao)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Versão não encontrada")
+def versao_atual():
+    return VERSAO_ATUAL
 
-    livro = next((l for l in biblia if l.get("abbrev") == book), None)
-    if not livro:
-        raise HTTPException(status_code=404, detail="Livro não encontrado")
-    total = len(livro.get("chapters", []))
-    return {"book": book, "chapters": list(range(1, total + 1))}
 
-@app.get("/api/verses")
-async def api_verses(versao: str = Query(...), book: str = Query(...), chapter: int = Query(...)):
-    """Retorna os versículos de um capítulo"""
-    try:
-        biblia = carregar_biblia(versao)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Versão não encontrada")
+@app.get("/trocar_versao")
+async def trocar_versao(request: Request, versao: str = Query("nvi")):
+    """
+    Agora a versão é trocada e o usuário volta para a MESMA página
+    usando o header Referer.
+    """
 
-    livro = next((l for l in biblia if l.get("abbrev") == book), None)
-    if not livro:
-        raise HTTPException(status_code=404, detail="Livro não encontrado")
+    global VERSAO_ATUAL
+    versoes_disponiveis = listar_versoes()
 
-    chapters = livro.get("chapters", [])
-    if chapter < 1 or chapter > len(chapters):
-        raise HTTPException(status_code=400, detail="Capítulo inválido")
+    if versao not in versoes_disponiveis:
+        raise HTTPException(status_code=400, detail="Versão inválida.")
 
-    verses = chapters[chapter - 1]
-    enumerated = [{"index": i + 1, "text": v} for i, v in enumerate(verses)]
-    return {"book": book, "chapter": chapter, "verses": enumerated}
+    # Troca a versão
+    VERSAO_ATUAL = versao
+
+    # Pega a página anterior
+    referer = request.headers.get("referer")
+
+    # Se não tiver referer, volta para /livros
+    voltar_para = referer or "/livros"
+
+    return RedirectResponse(voltar_para)
+
+# -------------------------------------------------------
+# Continua o resto do seu código normalmente...
+# -------------------------------------------------------
 

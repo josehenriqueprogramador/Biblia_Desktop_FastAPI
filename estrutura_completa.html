@@ -341,16 +341,19 @@ html += &quot;&lt;/body&gt;&lt;/html&gt;&quot;
 
 saida.write_text(html, encoding=&quot;utf-8&quot;)
 print(f&quot;✅ Arquivo HTML completo gerado: {saida}&quot;)
-</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 main.py</span><pre class='file-content' style='display:none; margin-top:5px;'>from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
+</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 main.py</span><pre class='file-content' style='display:none; margin-top:5px;'>from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, Query
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import json, os, io, sys
+from fastapi.middleware.cors import CORSMiddleware
+import json, os, io
 import enviar_leitura_whatsapp
 from models import LIVROS_NOMES
 
+# -------------------------------------------------------
+# Configuração base
+# -------------------------------------------------------
 app = FastAPI()
-
 BASE_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(BASE_DIR, &quot;data&quot;)
 UPLOADS_DIR = os.path.join(BASE_DIR, &quot;uploads&quot;)
@@ -361,15 +364,26 @@ os.makedirs(LEITURAS_DIR, exist_ok=True)
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, &quot;templates&quot;))
 
 # -------------------------------------------------------
+# CORS (para o app Kivy ou outro cliente)
+# -------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[&quot;*&quot;],  # em produção, restrinja
+    allow_credentials=True,
+    allow_methods=[&quot;*&quot;],
+    allow_headers=[&quot;*&quot;],
+)
+
+# -------------------------------------------------------
 # Funções auxiliares
 # -------------------------------------------------------
 def listar_versoes():
-    return sorted([f.replace(&quot;.json&quot;,&quot;&quot;) for f in os.listdir(DATA_DIR) if f.endswith(&quot;.json&quot;)])
+    return sorted([f.replace(&quot;.json&quot;, &quot;&quot;) for f in os.listdir(DATA_DIR) if f.endswith(&quot;.json&quot;)])
 
 def carregar_biblia(versao):
     caminho = os.path.join(DATA_DIR, f&quot;{versao}.json&quot;)
     if not os.path.exists(caminho):
-        return []
+        raise FileNotFoundError(f&quot;Versão {versao} não encontrada.&quot;)
     with open(caminho, &quot;r&quot;, encoding=&quot;utf-8-sig&quot;) as f:
         return json.load(f)
 
@@ -384,7 +398,7 @@ app.mount(&quot;/static&quot;, StaticFiles(directory=os.path.join(BASE_DIR, &quo
 versao_atual = &quot;nvi&quot;
 
 # -------------------------------------------------------
-# Rotas principais
+# Rotas HTML existentes
 # -------------------------------------------------------
 @app.get(&quot;/&quot;, response_class=HTMLResponse)
 async def index(request: Request):
@@ -405,21 +419,7 @@ async def livros(request: Request):
 async def trocar_versao(request: Request, versao: str = &quot;nvi&quot;):
     global versao_atual
     if versao in listar_versoes():
-        versao_atual = versao
-    return RedirectResponse(url=request.url_for(&quot;livros&quot;))
-
-@app.get(&quot;/capitulos/{livro_abrev}&quot;, response_class=HTMLResponse)
-async def capitulos(request: Request, livro_abrev: str):
-    biblia = carregar_biblia(versao_atual)
-    livro = next((l for l in biblia if l.get(&quot;abbrev&quot;) == livro_abrev), None)
-    if not livro:
-        return HTMLResponse(&quot;Livro não encontrado&quot;, status_code=404)
-    total = len(livro.get(&quot;chapters&quot;, []))
-    return templates.TemplateResponse(&quot;capitulos.html&quot;, {
-        &quot;request&quot;: request,
-        &quot;livro&quot;: livro,
-        &quot;total&quot;: total,
-        &quot;versao&quot;:
+        versao_atual = ver
 
 [... arquivo truncado por tamanho ...]</pre></li><li><span class='file' onclick='toggleFile(this)'>📄 models.py</span><pre class='file-content' style='display:none; margin-top:5px;'>﻿import json
 
@@ -533,22 +533,21 @@ document.getElementById(&#039;versaoSelect&#039;)?.addEventListener(&#039;change
   &lt;p&gt;Selecione um capítulo&lt;/p&gt;
 &lt;/div&gt;
 
-  &lt;div class=&quot;col&quot;&gt;
-    {% if livro.abbrev is defined %}
-      &lt;a href=&#039;{{ request.url_for(&quot;versiculos&quot;, livro_abrev=livro.abbrev, capitulo=i) }}?versao={{ versao }}&#039;
-         class=&quot;btn btn-success w-100&quot;&gt;Capítulo {{ i }}&lt;/a&gt;
-    {% else %}
+&lt;div class=&quot;row row-cols-2 row-cols-md-4 g-3&quot;&gt;
+  {% for i in range(1, total + 1) %}
+    &lt;div class=&quot;col&quot;&gt;
       &lt;a href=&#039;{{ request.url_for(&quot;versiculos&quot;, livro_abrev=livro[&quot;abbrev&quot;], capitulo=i) }}?versao={{ versao }}&#039;
          class=&quot;btn btn-success w-100&quot;&gt;Capítulo {{ i }}&lt;/a&gt;
-    {% endif %}
-  &lt;/div&gt;
+    &lt;/div&gt;
   {% endfor %}
 &lt;/div&gt;
 
 &lt;div class=&quot;mt-3&quot;&gt;
   &lt;a href=&quot;/livros?versao={{ versao }}&quot; class=&quot;btn btn-link&quot;&gt;⬅ Voltar&lt;/a&gt;
 &lt;/div&gt;
+
 {% endblock %}
+
 </pre></li><li><span class='file' onclick='toggleFile(this)'>📄 livros.html</span><pre class='file-content' style='display:none; margin-top:5px;'>{% extends &#039;base.html&#039; %}
 {% block content %}
 &lt;div class=&quot;text-center my-3&quot;&gt;
