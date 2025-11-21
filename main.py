@@ -236,13 +236,39 @@ async def upload_cronograma(request: Request, file: UploadFile = File(...)):
 @app.get("/api/versoes")
 def api_versoes():
     return {"versoes": listar_versoes()}
-
+'''
 @app.get("/api/livros/{versao}")
 def api_livros(versao: str):
     biblia = carregar_biblia_raw(versao)
     if biblia is None:
         raise HTTPException(status_code=404, detail="Versão não encontrada")
     return {"versao": versao, "livros": biblia}
+'''
+
+@app.get("/api/livros/{versao}")
+def api_livros(versao: str):
+    biblia = carregar_biblia_raw(versao)
+    if biblia is None:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    livros_formatados = []
+    for livro in biblia:
+        abrev = livro["abbrev"]  # já vem do JSON, exatamente como deve ser
+        nome = LIVROS_NOMES.get(abrev, abrev)  # pega do models.py
+        total_caps = len(livro.get("chapters", []))
+
+        livros_formatados.append({
+            "abbrev": abrev,
+            "nome_livro": nome,
+            "capitulos": total_caps
+        })
+
+    return {"versao": versao, "livros": livros_formatados}
+
+
+
+
+'''
 
 @app.get("/api/capitulos/{versao}/{livro_abrev}")
 def api_capitulos(versao: str, livro_abrev: str):
@@ -253,7 +279,30 @@ def api_capitulos(versao: str, livro_abrev: str):
     if not livro:
         raise HTTPException(status_code=404, detail="Livro não encontrado")
     return {"versao": versao, "livro": livro_abrev, "capitulos": len(livro.get("chapters", []))}
+'''
 
+@app.get("/api/capitulos/{versao}/{livro_abrev}")
+def api_capitulos(versao: str, livro_abrev: str):
+    biblia = carregar_biblia_raw(versao)
+    if biblia is None:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
+    if not livro:
+        raise HTTPException(status_code=404, detail="Livro não encontrado")
+
+    nome = LIVROS_NOMES.get(livro_abrev, livro_abrev)
+
+    return {
+        "versao": versao,
+        "abbrev": livro_abrev,
+        "nome_livro": nome,
+        "capitulos": len(livro.get("chapters", []))
+    }
+
+
+
+'''
 @app.get("/api/versiculos/{versao}/{livro_abrev}/{capitulo}")
 def api_versiculos(versao: str, livro_abrev: str, capitulo: int):
     biblia = carregar_biblia_raw(versao)
@@ -266,6 +315,99 @@ def api_versiculos(versao: str, livro_abrev: str, capitulo: int):
     if capitulo < 1 or capitulo > len(chapters):
         raise HTTPException(status_code=404, detail="Capítulo inválido")
     return {"versao": versao, "livro": livro_abrev, "capitulo": capitulo, "versiculos": chapters[capitulo - 1]}
+
+'''
+@app.get("/api/versiculos/{versao}/{livro_abrev}/{capitulo}")
+def api_versiculos(versao: str, livro_abrev: str, capitulo: int):
+    biblia = carregar_biblia_raw(versao)
+    if biblia is None:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
+    if not livro:
+        raise HTTPException(status_code=404, detail="Livro não encontrado")
+
+    chapters = livro.get("chapters", [])
+    if capitulo < 1 or capitulo > len(chapters):
+        raise HTTPException(status_code=404, detail="Capítulo inválido")
+
+    nome = LIVROS_NOMES.get(livro_abrev, livro_abrev)
+
+    return {
+        "versao": versao,
+        "abbrev": livro_abrev,
+        "nome_livro": nome,
+        "capitulo": capitulo,
+        "versiculos": chapters[capitulo - 1]
+    }
+
+#######################
+#somente um  versiculo#
+######################
+
+
+'''
+@app.get("/api/versiculo/{versao}/{livro_abrev}/{capitulo}/{numero}")
+def api_versiculo_unico(versao: str, livro_abrev: str, capitulo: int, numero: int):
+    biblia = carregar_biblia_raw(versao)
+    if biblia is None:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
+    if not livro:
+        raise HTTPException(status_code=404, detail="Livro não encontrado")
+
+    chapters = livro.get("chapters", [])
+    if capitulo < 1 or capitulo > len(chapters):
+        raise HTTPException(status_code=404, detail="Capítulo inválido")
+
+    versiculos = chapters[capitulo - 1]
+
+    if numero < 1 or numero > len(versiculos):
+        raise HTTPException(status_code=404, detail="Versículo inválido")
+
+    return {
+        "versao": versao,
+        "livro": livro_abrev,
+        "capitulo": capitulo,
+        "numero": numero,
+        "versiculo": versiculos[numero - 1]
+    }
+'''
+
+
+
+@app.get("/api/versiculo/{versao}/{livro_abrev}/{capitulo}/{numero}")
+def api_versiculo_unico(versao: str, livro_abrev: str, capitulo: int, numero: int):
+    biblia = carregar_biblia_raw(versao)
+    if biblia is None:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
+    if not livro:
+        raise HTTPException(status_code=404, detail="Livro não encontrado")
+
+    chapters = livro.get("chapters", [])
+    if capitulo < 1 or capitulo > len(chapters):
+        raise HTTPException(status_code=404, detail="Capítulo inválido")
+
+    versiculos = chapters[capitulo - 1]
+
+    if numero < 1 or numero > len(versiculos):
+        raise HTTPException(status_code=404, detail="Versículo inválido")
+
+    # pegar nome correto do livro usando models
+    nome_livro = LIVROS_NOMES.get(livro_abrev, livro_abrev.capitalize())
+
+    return {
+        "versao": versao,
+        "livro": livro_abrev,
+        "nome_livro": nome_livro,
+        "capitulo": capitulo,
+        "numero": numero,
+        "versiculo": versiculos[numero - 1]
+    }
+
 
 # ---------------------------
 # Rotas de execução / integração (mantive comportamento)
