@@ -407,6 +407,43 @@ def api_versiculo_unico(versao: str, livro_abrev: str, capitulo: int, numero: in
         "numero": numero,
         "versiculo": versiculos[numero - 1]
     }
+############################
+#budcando por palavra chave#
+###########################
+router = APIRouter()
+
+BASE = "data"   # pasta onde ficam os JSON
+# exemplo: data/aa.json, data/acf.json, etc.
+
+@router.get("/api/busca")
+def buscar_tema(versao: str, termo: str):
+    termo = termo.lower()
+
+    # caminho do arquivo JSON da versão
+    path = os.path.join(BASE, f"{versao}.json")
+
+    if not os.path.exists(path):
+        return {"erro": "Versão não encontrada"}
+
+    # carrega toda a bíblia dessa versão
+    with open(path, "r", encoding="utf-8") as f:
+        biblia = json.load(f)
+
+    resultados = []
+
+    # percorre TUDO
+    for livro, caps in biblia.items():
+        for cap, versos in caps.items():
+            for num, texto in versos.items():
+                if termo in texto.lower():
+                    resultados.append({
+                        "livro": livro,
+                        "capitulo": cap,
+                        "versiculo": num,
+                        "texto": texto
+                    })
+
+    return {"quantidade": len(resultados), "resultados": resultados}
 
 
 # ---------------------------
