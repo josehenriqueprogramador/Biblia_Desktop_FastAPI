@@ -4,6 +4,7 @@ import os
 import tempfile
 from urllib.parse import urlparse
 from typing import List, Optional
+from fastapi import APIRouter
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
@@ -14,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 import io
 import sys
-import enviar_leitura_whatsapp
+import enviar_leitura_telegram
 from models import LIVROS_NOMES
 
 # ---------------------------
