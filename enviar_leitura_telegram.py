@@ -2,224 +2,178 @@ import json
 import datetime
 import requests
 import os
+import re
 from pathlib import Path
 from dotenv import load_dotenv
+from PIL import Image, ImageEnhance
+import pytesseract
 
 # ===============================================================
-# 🔧 CARREGAR VARIÁVEIS DO .env
+# 🔧 CONFIGURAÇÕES E PASTAS
 # ===============================================================
-
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID_DESTINO = os.getenv("CHAT_ID_DESTINO")
-
-if not TELEGRAM_BOT_TOKEN or not CHAT_ID_DESTINO:
-    raise Exception("❌ ERRO: TELEGRAM_BOT_TOKEN ou CHAT_ID_DESTINO não definidos no .env")
-
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-# ===============================================================
-# 🔧 IMPORTS OPCIONAIS (OCR)
-# ===============================================================
-
-try:
-    from PIL import Image
-except ImportError:
-    import pip
-    pip.main(['install', 'Pillow'])
-    from PIL import Image
-
-try:
-    import pytesseract
-except ImportError:
-    import pip
-    pip.main(['install', 'pytesseract'])
-    import pytesseract
-
-
-# ===============================================================
-# 🔧 ESTRUTURA DE DIRETÓRIOS E ARQUIVOS
-# ===============================================================
 
 LEITURAS_DIR = "leituras"
 LEITURAS_JSON = os.path.join(LEITURAS_DIR, "leituras.json")
 BIBLIA_JSON = "data/nvi.json"
-
 UPLOADS_DIR = "uploads"
 PROCESSADAS_DIR = os.path.join(UPLOADS_DIR, "processadas")
 
+LIVROS = [
+    "Gênesis","Êxodo","Levítico","Números","Deuteronômio","Josué","Juízes","Rute",
+    "1 Samuel","2 Samuel","1 Reis","2 Reis","1 Crônicas","2 Crônicas","Esdras",
+    "Neemias","Ester","Jó","Salmos","Provérbios","Eclesiastes","Cânticos","Isaías",
+    "Jeremias","Lamentações","Ezequiel","Daniel","Oséias","Joel","Amós","Obadias",
+    "Jonas","Miquéias","Naum","Habacuque","Sofonias","Ageu","Zacarias","Malaquias",
+    "Mateus","Marcos","Lucas","João","Atos","Romanos","1 Coríntios","2 Coríntios",
+    "Gálatas","Efésios","Filipenses","Colossenses","1 Tessalonicenses",
+    "2 Tessalonicenses","1 Timóteo","2 Timóteo","Tito","Filemom","Hebreus",
+    "Tiago","1 Pedro","2 Pedro","1 João","2 João","3 João","Judas","Apocalipse",
+    "Joao" # Fallback para erros de OCR
+]
 
 # ===============================================================
-# 📁 CRIAR PASTAS SE NÃO EXISTIREM
+# 🧠 LÓGICA DE EXTRAÇÃO (REGEX)
 # ===============================================================
 
-def garantir_estrutura():
-    for pasta in [LEITURAS_DIR, UPLOADS_DIR, PROCESSADAS_DIR]:
-        if not os.path.exists(pasta):
-            os.makedirs(pasta)
-            print(f"📂 Criada pasta: {pasta}")
-
-    if not os.path.exists(LEITURAS_JSON):
-        with open(LEITURAS_JSON, "w", encoding="utf-8") as f:
-            json.dump([], f)
-            print(f"📄 Criado JSON vazio: {LEITURAS_JSON}")
-
-
-# ===============================================================
-# 🔠 PROCESSAR IMAGENS → OCR → JSON
-# ===============================================================
-
-def processar_imagens_para_json():
-    hoje = datetime.date.today().isoformat()
-    leituras = []
-
-    for img_path in Path(UPLOADS_DIR).glob("*.*"):
-        if img_path.is_file():
-            try:
-                texto = pytesseract.image_to_string(Image.open(img_path), lang="por")
-
-                if texto.strip():
-                    leituras.append({"data_envio": hoje, "texto": texto.strip()})
-                    print(f"✅ OCR realizado: {img_path}")
-
-                destino = Path(PROCESSADAS_DIR) / img_path.name
-                img_path.rename(destino)
-
-            except Exception as e:
-                print(f"❌ Erro ao processar {img_path}: {e}")
-
-    if leituras:
-        with open(LEITURAS_JSON, "w", encoding="utf-8") as f:
-            json.dump(leituras, f, ensure_ascii=False, indent=2)
-        print(f"📄 Atualizado JSON com leituras de hoje")
+def normalizar_livro_para_regex(nome):
+    """Cria regex flexível para livros com números (Ex: 1 Samuel, I Samuel)."""
+    nome_original = nome.strip()
+    m = re.match(r"^\s*([1-3]|I{1,3})\s+(.*)$", nome_original, flags=re.IGNORECASE)
+    if m:
+        parte_numeral = r"(?:[1-3]|I{1,3}|[1-3]°)?\\s*"
+        parte_nome = re.escape(m.group(2))
     else:
-        print("⚠️ Nenhum texto extraído")
+        parte_numeral = ""
+        parte_nome = re.escape(nome_original)
+    
+    return parte_numeral + re.sub(r"\\ ", r"\\s*", parte_nome)
 
+LIVROS_REGEX = "|".join(normalizar_livro_para_regex(l) for l in LIVROS)
 
-# ===============================================================
-# 📖 BUSCAR LEITURA DO DIA
-# ===============================================================
-
-def leituras_do_dia():
-    hoje = datetime.date.today().isoformat()
-
-    try:
-        with open(LEITURAS_JSON, "r", encoding="utf-8") as f:
-            leituras = json.load(f)
-
-        leituras_hoje = [l for l in leituras if l.get("data_envio") == hoje]
-
-        if not leituras_hoje:
-            print("⚠️ Nenhuma leitura encontrada para hoje.")
-            return None
-
-        return leituras_hoje[0].get("texto", "")
-
-    except Exception as e:
-        print("❌ Erro ao ler JSON:", e)
-        return None
-
+# Captura referências mesmo coladas em símbolos (Ex: •Josué)
+REGEX_REF = re.compile(
+    rf"((?:{LIVROS_REGEX})\s*\d+\s*[:]\s*\d+(?:\s*[-–—]\s*\d+)?)",
+    re.IGNORECASE,
+)
 
 # ===============================================================
-# 🕊️ GERAR TEXTO DA BÍBLIA A PARTIR DO OCR
+# 🖼️ PRÉ-PROCESSAMENTO (O segredo para a imagem de Abril)
 # ===============================================================
 
-def buscar_versiculos_do_texto(texto_ocr: str) -> str:
-    if not os.path.exists(BIBLIA_JSON):
-        print("❌ Arquivo da Bíblia não encontrado:", BIBLIA_JSON)
+def ocr_com_binarizacao(img_path: Path):
+    """Transforma a imagem em P&B puro para destacar texto claro em fundo colorido."""
+    img = Image.open(img_path)
+    gray = img.convert('L') # Escala de cinza
+    
+    # Aumenta contraste
+    enhancer = ImageEnhance.Contrast(gray)
+    gray = enhancer.enhance(2.0)
+    
+    # Binarização (Threshold): O que for claro vira branco, o que for escuro vira preto
+    # Isso isola o texto branco/amarelo do fundo azul claro da imagem de Abril
+    img_bin = gray.point(lambda x: 0 if x < 140 else 255, '1')
+    
+    return pytesseract.image_to_string(img_bin, lang="por")
+
+# ===============================================================
+# 🕊️ BUSCAR TEXTO NA BÍBLIA
+# ===============================================================
+
+def extrair_referencias_do_dia(texto_ocr: str, dia: int) -> list:
+    """Filtra o texto para pegar apenas as referências do dia atual."""
+    referencias = []
+    coletando = False
+    
+    padrao_inicio = re.compile(rf"\bD\s*I\s*A\s*0*{dia}\b", re.IGNORECASE)
+    padrao_fim = re.compile(rf"\bD\s*I\s*A\s*0*{dia + 1}\b", re.IGNORECASE)
+
+    for linha in texto_ocr.splitlines():
+        if padrao_inicio.search(linha):
+            coletando = True
+        elif coletando and padrao_fim.search(linha):
+            break
+        
+        if coletando:
+            encontrados = REGEX_REF.findall(linha)
+            for ref in encontrados:
+                # Normalização básica
+                ref_norm = re.sub(r"\s+", " ", ref).replace(" : ", ":")
+                referencias.append(ref_norm.strip())
+    
+    return list(dict.fromkeys(referencias)) # Remove duplicatas
+
+def buscar_texto_biblico(referencias: list) -> str:
+    if not os.path.exists(BIBLIA_JSON) or not referencias:
         return ""
 
     with open(BIBLIA_JSON, "r", encoding="utf-8") as f:
         biblia = json.load(f)
 
     resultado = []
-    linhas = texto_ocr.splitlines()
-
-    for linha in linhas:
-        linha = linha.strip()
-        if not linha or linha.startswith("DIA"):
+    for ref in referencias:
+        try:
+            # Tenta separar Livro de Capítulo:Versículo
+            partes = ref.rsplit(" ", 1)
+            livro = partes[0]
+            cap_vers = partes[1]
+            
+            cap, vers = cap_vers.split(":")
+            
+            if "-" in vers:
+                inicio, fim = map(int, vers.replace("–", "-").split("-"))
+                for i in range(inicio, fim + 1):
+                    texto = biblia.get(livro, {}).get(cap, {}).get(str(i), "")
+                    if texto: resultado.append(f"📖 {livro} {cap}:{i}\n{texto}")
+            else:
+                texto = biblia.get(livro, {}).get(cap, {}).get(vers, "")
+                if texto: resultado.append(f"📖 {livro} {cap}:{vers}\n{texto}")
+        except:
             continue
 
-        refs = linha.replace("+", ",").replace("«", ",").replace("e", ",").split(",")
-
-        for ref in refs:
-            ref = ref.strip()
-            if not ref or " " not in ref:
-                continue
-
-            livro, resto = ref.split(" ", 1)
-
-            if ":" in resto:
-                cap, vers = resto.split(":")
-
-                if "-" in vers:
-                    inicio, fim = map(int, vers.split("-"))
-                    for i in range(inicio, fim + 1):
-                        texto = biblia.get(livro, {}).get(cap, {}).get(str(i), "")
-                        if texto:
-                            resultado.append(f"{livro} {cap}:{i} — {texto}")
-                else:
-                    texto = biblia.get(livro, {}).get(cap, {}).get(vers, "")
-                    if texto:
-                        resultado.append(f"{livro} {cap}:{vers} — {texto}")
-            else:
-                texto = biblia.get(livro, {}).get(resto, "")
-                if texto:
-                    resultado.append(f"{livro} {resto} — {texto}")
-
-    return "\n".join(resultado)
-
-
-# ===============================================================
-# 📩 ENVIAR MENSAGEM PARA O TELEGRAM
-# ===============================================================
-
-def enviar_telegram(mensagem: str):
-    payload = {
-        "chat_id": CHAT_ID_DESTINO,
-        "text": mensagem
-    }
-
-    try:
-        r = requests.post(TELEGRAM_URL, json=payload)
-        print("Status:", r.status_code)
-        print("Resposta:", r.text)
-
-        if r.status_code == 200:
-            print("✅ Enviado com sucesso para o Telegram!")
-        else:
-            print("❌ Erro ao enviar")
-
-    except Exception as e:
-        print("❌ Erro na requisição:", e)
-
+    return "\n\n".join(resultado)
 
 # ===============================================================
 # ▶️ FLUXO PRINCIPAL
 # ===============================================================
 
 def main():
-    print("=== Iniciando envio para o Telegram ===")
+    garantir_estrutura() # Reaproveite sua função de criar pastas
+    hoje = datetime.date.today()
+    dia_atual = hoje.day
+    
+    print(f"🔍 Buscando leitura para o DIA {dia_atual}...")
 
-    garantir_estrutura()
-    processar_imagens_para_json()
+    for img_path in Path(UPLOADS_DIR).glob("*.*"):
+        if img_path.is_file() and not img_path.name.startswith("leitura_"):
+            print(f"📸 Processando imagem: {img_path.name}")
+            
+            texto_ocr = ocr_com_binarizacao(img_path)
+            referencias = extrair_referencias_do_dia(texto_ocr, dia_atual)
+            
+            if referencias:
+                print(f"✅ Referências encontradas: {referencias}")
+                mensagem = buscar_texto_biblico(referencias)
+                
+                if mensagem:
+                    enviar_telegram(mensagem)
+                    # Opcional: Salvar no JSON para cache
+                
+                # Move para processadas
+                img_path.rename(Path(PROCESSADAS_DIR) / img_path.name)
+            else:
+                print(f"⚠️ Nenhuma referência encontrada no DIA {dia_atual}")
 
-    texto_ocr = leituras_do_dia()
-    if not texto_ocr:
-        print("Nenhuma leitura hoje.")
-        return
+def garantir_estrutura():
+    for pasta in [LEITURAS_DIR, UPLOADS_DIR, PROCESSADAS_DIR]:
+        os.makedirs(pasta, exist_ok=True)
 
-    mensagem_final = buscar_versiculos_do_texto(texto_ocr)
-    if not mensagem_final:
-        print("Erro ao gerar versículos.")
-        return
-
-    print("📤 Enviando para Telegram…")
-    enviar_telegram(mensagem_final)
-
-    print("=== Fim ===")
-
+def enviar_telegram(mensagem: str):
+    requests.post(TELEGRAM_URL, json={"chat_id": CHAT_ID_DESTINO, "text": mensagem})
 
 if __name__ == "__main__":
     main()
