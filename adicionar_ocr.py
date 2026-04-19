@@ -1,78 +1,11 @@
-from fastapi import FastAPI
-from pathlib import Path
-from PIL import Image
-import pytesseract
-import json
-import datetime
+from fastapi import APIRouter, UploadFile, File, HTTPException                          from pathlib import Path
+import os                                   import enviar_leitura_telegram                                                          router = APIRouter()                                                                    UPLOADS_DIR = Path("uploads")
+UPLOADS_DIR.mkdir(exist_ok=True)            
+@router.post("/upload_e_processar")         async def upload_e_processar(file: UploadFile = File(...)):                                 """                                         Recebe uma imagem, salva no diretório uploads/
+    e aciona o processamento COMPLETO já existente                                          no arquivo enviar_leitura_telegram.py       """
+    try:
+        filename = os.path.basename(file.filename)                                              file_path = UPLOADS_DIR / filename                                                      # salva o arquivo                           with open(file_path, "wb") as f:                f.write(await file.read())                                                          # roda o fluxo COMPLETO já existente        enviar_leitura_telegram.main()                                                          return {
+            "status": "ok",                             "arquivo_recebido": str(file_path),                                                     "mensagem": "Processamento acionado."
+        }
 
-# Importa o módulo correto
-import enviar_leitura_telegram
-
-app = FastAPI()
-
-
-@app.get("/processar_ocr")
-def processar_ocr():
-
-    uploads_dir = Path("uploads")
-    processadas_dir = uploads_dir / "processadas"
-    processadas_dir.mkdir(exist_ok=True)
-
-    mensagens = []
-
-    # Garante estrutura do JSON
-    enviar_leitura_telegram.garantir_estrutura()
-
-    for img_path in uploads_dir.glob("*.*"):
-
-        destino = processadas_dir / img_path.name
-
-        # Ignorar arquivos já processados
-        if destino.exists():
-            continue
-
-        # Aceitar somente imagens
-        if img_path.suffix.lower() not in [".jpg", ".jpeg", ".png", ".webp"]:
-            mensagens.append(f"⚠️ Ignorado {img_path.name} (tipo não suportado)")
-            continue
-
-        try:
-            # ---- OCR ----
-            texto = pytesseract.image_to_string(Image.open(img_path), lang="por")
-
-            if not texto.strip():
-                mensagens.append(f"⚠️ {img_path.name}: Nenhum texto identificado.")
-                img_path.rename(destino)
-                continue
-
-            # ---- Salvar no JSON ----
-            with open(enviar_leitura_telegram.LEITURAS_JSON, "r+", encoding="utf-8") as f:
-                try:
-                    leituras = json.load(f)
-                except:
-                    leituras = []
-
-                leituras.append({
-                    "data_envio": str(datetime.date.today()),
-                    "texto": texto.strip()
-                })
-
-                f.seek(0)
-                json.dump(leituras, f, ensure_ascii=False, indent=2)
-                f.truncate()
-
-            # ---- Enviar para Telegram ----
-            try:
-                enviar_leitura_telegram.enviar_telegram(texto.strip())
-                mensagens.append(f"📨 Enviado ao Telegram: {img_path.name}")
-            except Exception as te:
-                mensagens.append(f"❌ Erro ao enviar Telegram: {te}")
-
-            # mover imagem
-            img_path.rename(destino)
-
-        except Exception as e:
-            mensagens.append(f"❌ Erro em {img_path.name}: {e}")
-
-    return {"mensagens": mensagens}
-
+    except Exception as e:                          raise HTTPException(status_code=500, detail=str(e))                             

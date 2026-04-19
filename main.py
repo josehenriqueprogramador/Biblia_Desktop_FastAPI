@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
-# main.py — FastAPI + HTML + API JSON (pronto para Termux)
+# -*- coding: utf-8-sig -*-
+# main1.py — FastAPI + HTML + API JSON (pronto para Termux)
+
 import os
 import tempfile
+import json
+import io
+import sys
 from urllib.parse import urlparse
 from typing import List, Optional
-from fastapi import APIRouter
 
+# Imports FastAPI separados
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-import json
-import io
-import sys
+# módulos do projeto separados
 import enviar_leitura_telegram
 from models import LIVROS_NOMES
 
+# incluir router do OCR (adicionar_ocr.py deve existir e exportar "router")
+try:
+    from adicionar_ocr import router as ocr_router
+except Exception:
+    ocr_router = None
+
 # ---------------------------
 # Paths / dirs
-# ---------------------------
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -33,23 +41,28 @@ VERSAO_FILE = os.path.join(DATA_DIR, "versao_atual.txt")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(LEITURAS_DIR, exist_ok=True)
-# templates and static should already exist in your repo; create if missing
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
+# also ensure uploads/processadas exists (enviar_leitura_telegram expects it)
+os.makedirs(os.path.join(UPLOADS_DIR, "processadas"), exist_ok=True)
 
 # ---------------------------
 # App / templates / static
-# ---------------------------
 app = FastAPI(title="Bíblia - HTML + API")
-
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
-
-# mount static (serve css/js/images)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# include OCR router if disponível
+if ocr_router is not None:
+    app.include_router(ocr_router)
+else:
+    # rota de fallback para facilitar debug se o arquivo não for importado
+    @app.get("/processar_ocr")
+    def processar_ocr_missing():
+        return {"erro": "adicionar_ocr.router não encontrado. Verifique adicionar_ocr.py"}
 
 # ---------------------------
 # CORS (dev default; override via ALLOWED_ORIGINS env)
-# ---------------------------
 try:
     allowed_origins_env = os.environ.get("ALLOWED_ORIGINS")
     if allowed_origins_env:
@@ -70,21 +83,15 @@ app.add_middleware(
 
 # ---------------------------
 # Helpers (JSON load, versões)
-# ---------------------------
 def listar_versoes() -> List[str]:
-    """
-    Lista arquivos .json em DATA_DIR -> retorna ['nvi', 'acf', ...]
-    """
+    """Lista arquivos .json em DATA_DIR -> retorna ['nvi', 'acf', ...]"""
     try:
         return sorted([f.replace(".json", "") for f in os.listdir(DATA_DIR) if f.endswith(".json")])
     except FileNotFoundError:
         return []
 
 def carregar_biblia_raw(versao: str):
-    """
-    Carrega o JSON bruto (lista de livros) do arquivo data/<versao>.json.
-    Retorna None se não existir.
-    """
+    """Carrega o JSON bruto (lista de livros) do arquivo data/<versao>.json. Retorna None se não existir."""
     caminho = os.path.join(DATA_DIR, f"{versao}.json")
     if not os.path.exists(caminho):
         return None
@@ -97,7 +104,7 @@ def get_versao_atual(default: str = "nvi") -> str:
         if os.path.exists(VERSAO_FILE):
             with open(VERSAO_FILE, "r", encoding="utf-8") as f:
                 v = f.read().strip()
-                return v or default
+            return v or default
     except Exception:
         pass
     return default
@@ -134,7 +141,6 @@ def safe_redirect_target(request: Request, target: Optional[str]) -> str:
 
 # ---------------------------
 # HTML Routes (usam templates existentes)
-# ---------------------------
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return RedirectResponse(url=request.url_for("livros"))
@@ -191,7 +197,6 @@ async def versiculos(request: Request, livro_abrev: str, capitulo: int):
 
 # ---------------------------
 # Trocar versão (POST e GET compatível)
-# ---------------------------
 @app.post("/trocar_versao", response_class=HTMLResponse)
 async def trocar_versao_post(request: Request, versao: str = Form(...), voltar_para: Optional[str] = Form(None)):
     versoes = listar_versoes()
@@ -211,12 +216,9 @@ async def trocar_versao_get(request: Request, versao: str = "nvi"):
 
 # ---------------------------
 # Upload (async-safe)
-# ---------------------------
-
 @app.get("/upload", response_class=HTMLResponse)
 async def upload_form(request: Request):
     return templates.TemplateResponse("upload.html", {"request": request})
-
 
 @app.post("/upload", response_class=HTMLResponse)
 async def upload_cronograma(request: Request, file: UploadFile = File(...)):
@@ -226,51 +228,47 @@ async def upload_cronograma(request: Request, file: UploadFile = File(...)):
         caminho = os.path.join(UPLOADS_DIR, filename)
         with open(caminho, "wb") as f:
             f.write(conteudo)
-        mensagem = f"Imagem '{filename}' enviada com sucesso!"
+
+        # CHAMADA NECESSÁRIA: dispara o processamento/ envio do versículo
+        # (processa imagens em uploads/, atualiza leituras.json e envia ao Telegram)
+        enviar_leitura_telegram.main()
+
+        # após enviar, apagar o arquivo processado que foi movido para uploads/processadas/<filename>
+        caminho_processadas = os.path.join(UPLOADS_DIR, "processadas", filename)
+        try:
+            if os.path.exists(caminho_processadas):
+                os.remove(caminho_processadas)
+                print(f"🗑️ Arquivo processado destruído: {caminho_processadas}")
+        except Exception as e:
+            print(f"⚠️ Falha ao apagar processadas/{filename}: {e}")
+        mensagem = f"Imagem '{filename}' enviada, processada e enviada ao Telegram!"
     except Exception as e:
         mensagem = f"Erro ao processar a imagem: {e}"
     return templates.TemplateResponse("upload.html", {"request": request, "mensagem": mensagem})
 
 # ---------------------------
 # API JSON (para app mobile)
-# ---------------------------
 @app.get("/api/versoes")
 def api_versoes():
     return {"versoes": listar_versoes()}
-'''
-@app.get("/api/livros/{versao}")
-def api_livros(versao: str):
-    biblia = carregar_biblia_raw(versao)
-    if biblia is None:
-        raise HTTPException(status_code=404, detail="Versão não encontrada")
-    return {"versao": versao, "livros": biblia}
-'''
 
 @app.get("/api/livros/{versao}")
 def api_livros(versao: str):
     biblia = carregar_biblia_raw(versao)
     if biblia is None:
         raise HTTPException(status_code=404, detail="Versão não encontrada")
-
     livros_formatados = []
     for livro in biblia:
-        abrev = livro["abbrev"]  # já vem do JSON, exatamente como deve ser
-        nome = LIVROS_NOMES.get(abrev, abrev)  # pega do models.py
+        abrev = livro["abbrev"]
+        nome = LIVROS_NOMES.get(abrev, abrev)
         total_caps = len(livro.get("chapters", []))
-
         livros_formatados.append({
-            "abbrev": abrev,
+            "abrev": abrev,
             "nome_livro": nome,
             "capitulos": total_caps
         })
-
     return {"versao": versao, "livros": livros_formatados}
 
-
-
-
-'''
-
 @app.get("/api/capitulos/{versao}/{livro_abrev}")
 def api_capitulos(versao: str, livro_abrev: str):
     biblia = carregar_biblia_raw(versao)
@@ -279,21 +277,7 @@ def api_capitulos(versao: str, livro_abrev: str):
     livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
     if not livro:
         raise HTTPException(status_code=404, detail="Livro não encontrado")
-    return {"versao": versao, "livro": livro_abrev, "capitulos": len(livro.get("chapters", []))}
-'''
-
-@app.get("/api/capitulos/{versao}/{livro_abrev}")
-def api_capitulos(versao: str, livro_abrev: str):
-    biblia = carregar_biblia_raw(versao)
-    if biblia is None:
-        raise HTTPException(status_code=404, detail="Versão não encontrada")
-
-    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
-    if not livro:
-        raise HTTPException(status_code=404, detail="Livro não encontrado")
-
     nome = LIVROS_NOMES.get(livro_abrev, livro_abrev)
-
     return {
         "versao": versao,
         "abbrev": livro_abrev,
@@ -301,9 +285,6 @@ def api_capitulos(versao: str, livro_abrev: str):
         "capitulos": len(livro.get("chapters", []))
     }
 
-
-
-'''
 @app.get("/api/versiculos/{versao}/{livro_abrev}/{capitulo}")
 def api_versiculos(versao: str, livro_abrev: str, capitulo: int):
     biblia = carregar_biblia_raw(versao)
@@ -315,25 +296,7 @@ def api_versiculos(versao: str, livro_abrev: str, capitulo: int):
     chapters = livro.get("chapters", [])
     if capitulo < 1 or capitulo > len(chapters):
         raise HTTPException(status_code=404, detail="Capítulo inválido")
-    return {"versao": versao, "livro": livro_abrev, "capitulo": capitulo, "versiculos": chapters[capitulo - 1]}
-
-'''
-@app.get("/api/versiculos/{versao}/{livro_abrev}/{capitulo}")
-def api_versiculos(versao: str, livro_abrev: str, capitulo: int):
-    biblia = carregar_biblia_raw(versao)
-    if biblia is None:
-        raise HTTPException(status_code=404, detail="Versão não encontrada")
-
-    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
-    if not livro:
-        raise HTTPException(status_code=404, detail="Livro não encontrado")
-
-    chapters = livro.get("chapters", [])
-    if capitulo < 1 or capitulo > len(chapters):
-        raise HTTPException(status_code=404, detail="Capítulo inválido")
-
     nome = LIVROS_NOMES.get(livro_abrev, livro_abrev)
-
     return {
         "versao": versao,
         "abbrev": livro_abrev,
@@ -342,64 +305,21 @@ def api_versiculos(versao: str, livro_abrev: str, capitulo: int):
         "versiculos": chapters[capitulo - 1]
     }
 
-#######################
-#somente um  versiculo#
-######################
-
-
-'''
 @app.get("/api/versiculo/{versao}/{livro_abrev}/{capitulo}/{numero}")
 def api_versiculo_unico(versao: str, livro_abrev: str, capitulo: int, numero: int):
     biblia = carregar_biblia_raw(versao)
     if biblia is None:
         raise HTTPException(status_code=404, detail="Versão não encontrada")
-
     livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
     if not livro:
         raise HTTPException(status_code=404, detail="Livro não encontrado")
-
     chapters = livro.get("chapters", [])
     if capitulo < 1 or capitulo > len(chapters):
         raise HTTPException(status_code=404, detail="Capítulo inválido")
-
     versiculos = chapters[capitulo - 1]
-
     if numero < 1 or numero > len(versiculos):
         raise HTTPException(status_code=404, detail="Versículo inválido")
-
-    return {
-        "versao": versao,
-        "livro": livro_abrev,
-        "capitulo": capitulo,
-        "numero": numero,
-        "versiculo": versiculos[numero - 1]
-    }
-'''
-
-
-
-@app.get("/api/versiculo/{versao}/{livro_abrev}/{capitulo}/{numero}")
-def api_versiculo_unico(versao: str, livro_abrev: str, capitulo: int, numero: int):
-    biblia = carregar_biblia_raw(versao)
-    if biblia is None:
-        raise HTTPException(status_code=404, detail="Versão não encontrada")
-
-    livro = next((l for l in biblia if l.get("abbrev") == livro_abrev), None)
-    if not livro:
-        raise HTTPException(status_code=404, detail="Livro não encontrado")
-
-    chapters = livro.get("chapters", [])
-    if capitulo < 1 or capitulo > len(chapters):
-        raise HTTPException(status_code=404, detail="Capítulo inválido")
-
-    versiculos = chapters[capitulo - 1]
-
-    if numero < 1 or numero > len(versiculos):
-        raise HTTPException(status_code=404, detail="Versículo inválido")
-
-    # pegar nome correto do livro usando models
     nome_livro = LIVROS_NOMES.get(livro_abrev, livro_abrev.capitalize())
-
     return {
         "versao": versao,
         "livro": livro_abrev,
@@ -408,84 +328,15 @@ def api_versiculo_unico(versao: str, livro_abrev: str, capitulo: int, numero: in
         "numero": numero,
         "versiculo": versiculos[numero - 1]
     }
-############################
-#budcando por palavra chave#
-###########################
-router = APIRouter()
-
-BASE = "data"   # pasta onde ficam os JSON
-# exemplo: data/aa.json, data/acf.json, etc.
-
-@router.get("/api/busca")
-def buscar_tema(versao: str, termo: str):
-    termo = termo.lower()
-
-    # caminho do arquivo JSON da versão
-    path = os.path.join(BASE, f"{versao}.json")
-
-    if not os.path.exists(path):
-        return {"erro": "Versão não encontrada"}
-
-    # carrega toda a bíblia dessa versão
-    with open(path, "r", encoding="utf-8") as f:
-        biblia = json.load(f)
-
-    resultados = []
-
-    # percorre TUDO
-    for livro, caps in biblia.items():
-        for cap, versos in caps.items():
-            for num, texto in versos.items():
-                if termo in texto.lower():
-                    resultados.append({
-                        "livro": livro,
-                        "capitulo": cap,
-                        "versiculo": num,
-                        "texto": texto
-                    })
-
-    return {"quantidade": len(resultados), "resultados": resultados}
-
 
 # ---------------------------
 # Rotas de execução / integração (mantive comportamento)
-# ---------------------------
-@app.get("/enviar_versiculo")
-def enviar_versiculo():
-    buffer = io.StringIO()
-    old_stdout = sys.stdout
-    sys.stdout = buffer
-    try:
-        enviar_leitura_whatsapp.main()
-    except Exception as e:
-        print("❌ Erro:", e)
-    finally:
-        sys.stdout = old_stdout
-    return {"status": "execução realizada", "logs": buffer.getvalue()}
-
-@app.get("/testar_whatsapp")
-def testar_whatsapp():
-    buffer = io.StringIO()
-    old_stdout = sys.stdout
-    sys.stdout = buffer
-    try:
-        enviar_leitura_whatsapp.main()
-    except Exception as e:
-        print("❌ Erro:", e)
-    finally:
-        sys.stdout = old_stdout
-    return JSONResponse(content={"logs": buffer.getvalue()})
-
-# ---------------------------
-# Health
-# ---------------------------
 @app.get("/_health")
 def health():
     return {"status": "ok", "versao_atual": get_versao_atual()}
 
 # ---------------------------
 # Run (dev)
-# ---------------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5000)
